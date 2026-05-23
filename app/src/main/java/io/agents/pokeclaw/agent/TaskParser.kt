@@ -49,12 +49,13 @@ object TaskParser {
 
     // ==================== Pattern Matchers ====================
 
-    private val CALL_PATTERN = Regex(
-        """(?:call|phone|ring|dial|打電話|打畀|致電)\s+(.+)""", RegexOption.IGNORE_CASE
+    private val CALL_PATTERNS = listOf(
+        Regex("""(?:call|phone|ring|dial|打电话|打電話|拨打|撥打|打畀|致電)\s+(.+)""", RegexOption.IGNORE_CASE),
+        Regex("""给\s*(.+?)\s*打(?:电话|電話)""", RegexOption.IGNORE_CASE),
     )
 
     private fun matchCall(lower: String, original: String): ParseResult? {
-        val match = CALL_PATTERN.find(lower) ?: return null
+        val match = CALL_PATTERNS.firstNotNullOfOrNull { it.find(original.trim()) } ?: return null
         val target = match.groupValues[1].trim()
         // Check if target looks like a phone number
         val numberMatch = Regex("""[\d\s\-+()]{7,}""").find(target)
@@ -110,18 +111,20 @@ object TaskParser {
         if (value.isBlank()) return "WhatsApp"
         return when (value.lowercase()) {
             "wa", "whatsapp", "whats app" -> "WhatsApp"
-            "telegram", "tg" -> "Telegram"
-            "sms", "message", "messages", "android messages", "google messages" -> "Messages"
+            "telegram", "tg", "电报", "電報" -> "Telegram"
+            "wechat", "微信" -> "WeChat"
+            "sms", "message", "messages", "android messages", "google messages", "短信", "信息" -> "Messages"
             else -> value
         }
     }
 
-    private val SMS_PATTERN = Regex(
-        """(?:sms|text|message|send.*(?:sms|text)|發短訊|發信息)\s+(?:to\s+)?(.+)""", RegexOption.IGNORE_CASE
+    private val SMS_PATTERNS = listOf(
+        Regex("""(?:sms|text|message|send.*(?:sms|text)|发短信|發短訊|发信息|發信息)\s+(?:to\s+)?(.+)""", RegexOption.IGNORE_CASE),
+        Regex("""(?:给|向)\s*(.+?)\s*(?:发|发送|發|傳送)(?:短信|信息|消息|短訊)""", RegexOption.IGNORE_CASE),
     )
 
     private fun matchSms(lower: String, original: String): ParseResult? {
-        val match = SMS_PATTERN.find(lower) ?: return null
+        val match = SMS_PATTERNS.firstNotNullOfOrNull { it.find(original.trim()) } ?: return null
         val target = match.groupValues[1].trim()
         val numberMatch = Regex("""[\d\s\-+()]{7,}""").find(target)
         return if (numberMatch != null) {
@@ -135,7 +138,7 @@ object TaskParser {
     }
 
     private val ALARM_PATTERN = Regex(
-        """(?:set|create)?\s*(?:alarm|鬧鐘|叫醒|wake\s*(?:me\s*)?up)\s*(?:at|for)?\s*(\d{1,2})[:\s]?(\d{2})?\s*(am|pm)?""",
+        """(?:set|create|设置|設定)?\s*(?:alarm|闹钟|鬧鐘|叫醒|wake\s*(?:me\s*)?up)\s*(?:at|for|在)?\s*(\d{1,2})[:：\s]?(\d{2})?\s*(am|pm)?""",
         RegexOption.IGNORE_CASE
     )
 
@@ -159,7 +162,7 @@ object TaskParser {
     }
 
     private val TIMER_PATTERN = Regex(
-        """(?:set|start)?\s*(?:timer|countdown|計時)\s*(?:for)?\s*(\d+)\s*(second|sec|minute|min|hour|hr|s|m|h)""",
+        """(?:set|start|设置|設定|开始|啟動|启动)?\s*(?:timer|countdown|计时器|計時器|計時)\s*(?:for|为|為)?\s*(\d+)\s*(second|sec|minute|min|hour|hr|s|m|h|秒|分钟|分鐘|小时|小時)""",
         RegexOption.IGNORE_CASE
     )
 
@@ -168,8 +171,8 @@ object TaskParser {
         val amount = match.groupValues[1].toIntOrNull() ?: return null
         val unit = match.groupValues[2].lowercase()
         val seconds = when {
-            unit.startsWith("h") -> amount * 3600
-            unit.startsWith("m") -> amount * 60
+            unit.startsWith("h") || unit in setOf("小时", "小時") -> amount * 3600
+            unit.startsWith("m") || unit in setOf("分钟", "分鐘") -> amount * 60
             else -> amount
         }
 
@@ -185,7 +188,8 @@ object TaskParser {
 
     private fun matchScreenshot(lower: String): ParseResult? {
         if (!lower.contains("screenshot") && !lower.contains("screencap") &&
-            !lower.contains("截圖") && !lower.contains("影相")) return null
+            !lower.contains("截图") && !lower.contains("截屏") &&
+            !lower.contains("截圖") && !lower.contains("螢幕截圖") && !lower.contains("影相")) return null
         return ParseResult(
             action = "screenshot",
             intent = null,
@@ -199,14 +203,17 @@ object TaskParser {
         return when {
             lower == "go back" || lower == "back" || lower == "返回" ->
                 ParseResult("back", null, "system_key", mapOf("key" to "back"), "Going back")
-            lower == "go home" || lower == "home" || lower == "返回主頁" ->
+            lower == "go back" || lower == "back" || lower == "后退" || lower == "後退" ->
+                ParseResult("back", null, "system_key", mapOf("key" to "back"), "Going back")
+            lower == "go home" || lower == "home" || lower == "返回主页" || lower == "返回主頁" ||
+                lower == "回主页" || lower == "回主頁" || lower == "回桌面" || lower == "主屏幕" ->
                 ParseResult("home", null, "system_key", mapOf("key" to "home"), "Going home")
             else -> null
         }
     }
 
     private val URL_PATTERN = Regex(
-        """(?:open|go\s*to|visit|navigate\s*to|打開)\s+(https?://\S+)""", RegexOption.IGNORE_CASE
+        """(?:open|go\s*to|visit|navigate\s*to|打开|打開|开启|啟動|启动)\s+(https?://\S+)""", RegexOption.IGNORE_CASE
     )
 
     private fun matchOpenUrl(lower: String, original: String): ParseResult? {
@@ -221,21 +228,40 @@ object TaskParser {
 
     private val SETTINGS_KEYWORDS = mapOf(
         "wifi" to "android.settings.WIFI_SETTINGS",
+        "无线" to "android.settings.WIFI_SETTINGS",
+        "無線" to "android.settings.WIFI_SETTINGS",
         "bluetooth" to "android.settings.BLUETOOTH_SETTINGS",
+        "蓝牙" to "android.settings.BLUETOOTH_SETTINGS",
+        "藍牙" to "android.settings.BLUETOOTH_SETTINGS",
         "display" to "android.settings.DISPLAY_SETTINGS",
         "brightness" to "android.settings.DISPLAY_SETTINGS",
+        "显示" to "android.settings.DISPLAY_SETTINGS",
+        "亮度" to "android.settings.DISPLAY_SETTINGS",
         "sound" to "android.settings.SOUND_SETTINGS",
         "volume" to "android.settings.SOUND_SETTINGS",
+        "声音" to "android.settings.SOUND_SETTINGS",
+        "音量" to "android.settings.SOUND_SETTINGS",
         "battery" to "android.intent.action.POWER_USAGE_SUMMARY",
+        "电池" to "android.intent.action.POWER_USAGE_SUMMARY",
+        "电量" to "android.intent.action.POWER_USAGE_SUMMARY",
         "storage" to "android.settings.INTERNAL_STORAGE_SETTINGS",
+        "存储" to "android.settings.INTERNAL_STORAGE_SETTINGS",
+        "空间" to "android.settings.INTERNAL_STORAGE_SETTINGS",
         "location" to "android.settings.LOCATION_SOURCE_SETTINGS",
+        "定位" to "android.settings.LOCATION_SOURCE_SETTINGS",
+        "位置" to "android.settings.LOCATION_SOURCE_SETTINGS",
         "airplane" to "android.settings.AIRPLANE_MODE_SETTINGS",
+        "飞行模式" to "android.settings.AIRPLANE_MODE_SETTINGS",
         "notification" to "android.settings.APP_NOTIFICATION_SETTINGS",
+        "通知" to "android.settings.APP_NOTIFICATION_SETTINGS",
         "accessibility" to "android.settings.ACCESSIBILITY_SETTINGS",
+        "无障碍" to "android.settings.ACCESSIBILITY_SETTINGS",
+        "無障礙" to "android.settings.ACCESSIBILITY_SETTINGS",
     )
 
     private fun matchOpenSettings(lower: String): ParseResult? {
-        if (!lower.contains("settings") && !lower.contains("設定")) return null
+        if (!lower.contains("settings") && !lower.contains("setting") &&
+            !lower.contains("设置") && !lower.contains("設定")) return null
 
         // Check for specific settings keywords
         for ((keyword, action) in SETTINGS_KEYWORDS) {
@@ -249,7 +275,7 @@ object TaskParser {
         }
 
         // Generic "open settings"
-        if (lower.matches(Regex(".*(?:open|go to|打開)\\s*(?:the\\s*)?settings.*"))) {
+        if (lower.matches(Regex(".*(?:open|go to|打开|打開|开启|启动|啟動)\\s*(?:the\\s*)?(?:settings|setting|设置|設定).*"))) {
             return ParseResult(
                 action = "open_settings",
                 intent = Intent(android.provider.Settings.ACTION_SETTINGS),
@@ -261,7 +287,7 @@ object TaskParser {
     }
 
     private val OPEN_APP_PATTERN = Regex(
-        """(?:open|launch|start|打開|開)\s+(?:the\s+)?(.+?)(?:\s+app)?$""", RegexOption.IGNORE_CASE
+        """(?:open|launch|start|打开|打開|开启|啟動|启动|開)\s+(?:the\s+)?(.+?)(?:\s+app|应用|應用)?$""", RegexOption.IGNORE_CASE
     )
 
     private fun matchOpenApp(lower: String, original: String, installedPackages: List<String>): ParseResult? {
@@ -269,7 +295,9 @@ object TaskParser {
         val appName = match.groupValues[1].trim()
 
         // Don't match if the task has more complexity (e.g., "open YouTube and search for cats")
-        if (lower.contains(" and ") || lower.contains(" then ") || lower.contains("，然後")) return null
+        if (lower.contains(" and ") || lower.contains(" then ") || lower.contains("，然後") ||
+            lower.contains("然后") || lower.contains("之後") || lower.contains("之后") ||
+            lower.contains("并且") || lower.contains("並且")) return null
 
         return ParseResult(
             action = "open_app",

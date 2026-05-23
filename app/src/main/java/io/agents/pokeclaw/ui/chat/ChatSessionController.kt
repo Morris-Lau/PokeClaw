@@ -47,7 +47,7 @@ class ChatSessionController(
 
     companion object {
         private const val TAG = "ChatSessionController"
-        private const val BASE_SYSTEM_PROMPT = "You are a helpful AI assistant on an Android phone."
+        private const val BASE_SYSTEM_PROMPT = "You are a helpful AI assistant on an Android phone. Reply in the same language the user used by default."
     }
 
     private var engine: Engine? = null

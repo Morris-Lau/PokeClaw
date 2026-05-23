@@ -19,6 +19,7 @@ import android.os.StatFs;
 import android.provider.Settings;
 
 import io.agents.pokeclaw.ClawApplication;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
 import io.agents.pokeclaw.tool.ToolResult;
@@ -73,18 +74,21 @@ public class GetDeviceInfoTool extends BaseTool {
             switch (category) {
                 case "battery": return getBatteryInfo(ctx);
                 case "wifi": return getWifiInfo(ctx);
-                case "storage": return getStorageInfo();
-                case "bluetooth": return getBluetoothInfo();
+                case "storage": return getStorageInfo(ctx);
+                case "bluetooth": return getBluetoothInfo(ctx);
                 case "screen": return getScreenInfo(ctx);
-                case "device": return getDeviceDetails();
-                case "time": return getCurrentTime();
+                case "device": return getDeviceDetails(ctx);
+                case "time": return getCurrentTime(ctx);
                 default:
-                    return ToolResult.error("Unknown category: " + category
-                            + ". Use: battery, wifi, storage, bluetooth, screen, device, time");
+                    return ToolResult.error(chinese(ctx)
+                            ? "未知类别：" + category + "。请使用：battery, wifi, storage, bluetooth, screen, device, time"
+                            : "Unknown category: " + category + ". Use: battery, wifi, storage, bluetooth, screen, device, time");
             }
         } catch (Exception e) {
             XLog.e(TAG, "Failed to get " + category + " info", e);
-            return ToolResult.error("Failed to get " + category + " info: " + e.getMessage());
+            return ToolResult.error(chinese(ctx)
+                    ? "获取 " + category + " 信息失败：" + e.getMessage()
+                    : "Failed to get " + category + " info: " + e.getMessage());
         }
     }
 
@@ -102,8 +106,13 @@ public class GetDeviceInfoTool extends BaseTool {
         float tempC = tempRaw / 10.0f;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("Battery: ").append(level).append("%");
-        sb.append(charging ? ", charging" : ", not charging");
+        if (chinese(ctx)) {
+            sb.append("电量：").append(level).append("%");
+            sb.append(charging ? "，正在充电" : "，未充电");
+        } else {
+            sb.append("Battery: ").append(level).append("%");
+            sb.append(charging ? ", charging" : ", not charging");
+        }
         if (tempC > 0) sb.append(", ").append(String.format("%.1f°C", tempC));
 
         XLog.d(TAG, "Battery info: " + sb);
@@ -113,7 +122,7 @@ public class GetDeviceInfoTool extends BaseTool {
     private ToolResult getWifiInfo(Context ctx) {
         WifiManager wm = (WifiManager) ctx.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         if (wm == null || !wm.isWifiEnabled()) {
-            return ToolResult.success("WiFi: disabled");
+            return ToolResult.success(chinese(ctx) ? "WiFi：已关闭" : "WiFi: disabled");
         }
 
         ConnectivityManager cm = (ConnectivityManager) ctx.getSystemService(Context.CONNECTIVITY_SERVICE);
@@ -122,7 +131,7 @@ public class GetDeviceInfoTool extends BaseTool {
 
         WifiInfo info = wm.getConnectionInfo();
         if (info == null || info.getNetworkId() == -1) {
-            return ToolResult.success("WiFi: enabled but not connected");
+            return ToolResult.success(chinese(ctx) ? "WiFi：已开启但未连接" : "WiFi: enabled but not connected");
         }
 
         String ssid = info.getSSID();
@@ -133,16 +142,23 @@ public class GetDeviceInfoTool extends BaseTool {
         String band = freq > 4900 ? "5GHz" : "2.4GHz";
 
         StringBuilder sb = new StringBuilder();
-        sb.append("WiFi: connected to '").append(ssid).append("'");
-        sb.append(", ").append(band);
-        sb.append(", signal ").append(rssi).append("dBm");
-        sb.append(", ").append(speed).append("Mbps");
+        if (chinese(ctx)) {
+            sb.append("WiFi：已连接到「").append(ssid).append("」");
+            sb.append("，").append(band);
+            sb.append("，信号 ").append(rssi).append("dBm");
+            sb.append("，").append(speed).append("Mbps");
+        } else {
+            sb.append("WiFi: connected to '").append(ssid).append("'");
+            sb.append(", ").append(band);
+            sb.append(", signal ").append(rssi).append("dBm");
+            sb.append(", ").append(speed).append("Mbps");
+        }
 
         XLog.d(TAG, "WiFi info: " + sb);
         return ToolResult.success(sb.toString());
     }
 
-    private ToolResult getStorageInfo() {
+    private ToolResult getStorageInfo(Context ctx) {
         StatFs stat = new StatFs(Environment.getDataDirectory().getAbsolutePath());
         long totalBytes = stat.getTotalBytes();
         long freeBytes = stat.getAvailableBytes();
@@ -153,27 +169,29 @@ public class GetDeviceInfoTool extends BaseTool {
         String free = formatBytes(freeBytes);
         int pct = (int) (usedBytes * 100 / totalBytes);
 
-        String result = "Storage: " + used + " used of " + total + " (" + pct + "%), " + free + " free";
+        String result = chinese(ctx)
+                ? "存储：" + total + " 共已用 " + used + "（" + pct + "%），剩余 " + free
+                : "Storage: " + used + " used of " + total + " (" + pct + "%), " + free + " free";
         XLog.d(TAG, "Storage info: " + result);
         return ToolResult.success(result);
     }
 
-    private ToolResult getBluetoothInfo() {
+    private ToolResult getBluetoothInfo(Context ctx) {
         BluetoothAdapter adapter = BluetoothAdapter.getDefaultAdapter();
         if (adapter == null) {
-            return ToolResult.success("Bluetooth: not available on this device");
+            return ToolResult.success(chinese(ctx) ? "蓝牙：此设备不可用" : "Bluetooth: not available on this device");
         }
         if (!adapter.isEnabled()) {
-            return ToolResult.success("Bluetooth: disabled");
+            return ToolResult.success(chinese(ctx) ? "蓝牙：已关闭" : "Bluetooth: disabled");
         }
 
         StringBuilder sb = new StringBuilder();
-        sb.append("Bluetooth: enabled");
+        sb.append(chinese(ctx) ? "蓝牙：已开启" : "Bluetooth: enabled");
 
         try {
             Set<BluetoothDevice> bonded = adapter.getBondedDevices();
             if (bonded != null && !bonded.isEmpty()) {
-                sb.append(", paired devices: ");
+                sb.append(chinese(ctx) ? "，已配对设备：" : ", paired devices: ");
                 int i = 0;
                 for (BluetoothDevice device : bonded) {
                     if (i > 0) sb.append(", ");
@@ -183,7 +201,7 @@ public class GetDeviceInfoTool extends BaseTool {
                 }
             }
         } catch (SecurityException e) {
-            sb.append(" (cannot list devices — permission denied)");
+            sb.append(chinese(ctx) ? "（缺少权限，无法列出设备）" : " (cannot list devices — permission denied)");
         }
 
         XLog.d(TAG, "Bluetooth info: " + sb);
@@ -198,50 +216,59 @@ public class GetDeviceInfoTool extends BaseTool {
             int brightness = Settings.System.getInt(ctx.getContentResolver(), Settings.System.SCREEN_BRIGHTNESS);
             int maxBrightness = 255;
             int pct = brightness * 100 / maxBrightness;
-            sb.append("Brightness: ").append(pct).append("%");
+            sb.append(chinese(ctx) ? "亮度：" : "Brightness: ").append(pct).append("%");
         } catch (Settings.SettingNotFoundException e) {
-            sb.append("Brightness: unknown");
+            sb.append(chinese(ctx) ? "亮度：未知" : "Brightness: unknown");
         }
 
         // Dark mode
         int nightMode = ctx.getResources().getConfiguration().uiMode
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
         boolean isDark = nightMode == android.content.res.Configuration.UI_MODE_NIGHT_YES;
-        sb.append(", Dark mode: ").append(isDark ? "ON" : "OFF");
+        sb.append(chinese(ctx) ? "，深色模式：" : ", Dark mode: ");
+        sb.append(isDark ? (chinese(ctx) ? "开启" : "ON") : (chinese(ctx) ? "关闭" : "OFF"));
 
         // Auto-brightness
         try {
             int autoBrightness = Settings.System.getInt(ctx.getContentResolver(),
                     Settings.System.SCREEN_BRIGHTNESS_MODE);
-            sb.append(", Auto-brightness: ").append(autoBrightness == 1 ? "ON" : "OFF");
+            sb.append(chinese(ctx) ? "，自动亮度：" : ", Auto-brightness: ");
+            sb.append(autoBrightness == 1 ? (chinese(ctx) ? "开启" : "ON") : (chinese(ctx) ? "关闭" : "OFF"));
         } catch (Settings.SettingNotFoundException ignored) {}
 
         XLog.d(TAG, "Screen info: " + sb);
         return ToolResult.success(sb.toString());
     }
 
-    private ToolResult getDeviceDetails() {
+    private ToolResult getDeviceDetails(Context ctx) {
         StringBuilder sb = new StringBuilder();
         sb.append("Android ").append(android.os.Build.VERSION.RELEASE);
         sb.append(" (API ").append(android.os.Build.VERSION.SDK_INT).append(")");
-        sb.append(", Model: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL);
-        sb.append(", Build: ").append(android.os.Build.DISPLAY);
+        sb.append(chinese(ctx) ? "，型号：" : ", Model: ").append(android.os.Build.MANUFACTURER).append(" ").append(android.os.Build.MODEL);
+        sb.append(chinese(ctx) ? "，版本：" : ", Build: ").append(android.os.Build.DISPLAY);
         String security = android.os.Build.VERSION.SECURITY_PATCH;
         if (security != null && !security.isEmpty()) {
-            sb.append(", Security patch: ").append(security);
+            sb.append(chinese(ctx) ? "，安全补丁：" : ", Security patch: ").append(security);
         }
         XLog.d(TAG, "Device info: " + sb);
         return ToolResult.success(sb.toString());
     }
 
-    private ToolResult getCurrentTime() {
+    private ToolResult getCurrentTime(Context ctx) {
         java.text.SimpleDateFormat sdf = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", java.util.Locale.getDefault());
         String localTime = sdf.format(new java.util.Date());
         java.util.TimeZone tz = java.util.TimeZone.getDefault();
-        String result = "Current time: " + localTime + " (timezone: " + tz.getID()
+        String result = chinese(ctx)
+                ? "当前时间：" + localTime + "（时区：" + tz.getID()
+                + "，UTC 偏移：" + (tz.getRawOffset() / 3600000) + "h）"
+                : "Current time: " + localTime + " (timezone: " + tz.getID()
                 + ", UTC offset: " + (tz.getRawOffset() / 3600000) + "h)";
         XLog.d(TAG, "Time info: " + result);
         return ToolResult.success(result);
+    }
+
+    private boolean chinese(Context ctx) {
+        return AppLocaleManager.INSTANCE.shouldUseChinese(ctx);
     }
 
     private String formatBytes(long bytes) {

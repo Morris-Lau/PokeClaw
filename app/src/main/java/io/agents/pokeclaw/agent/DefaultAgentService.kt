@@ -81,6 +81,7 @@ class DefaultAgentService : AgentService {
 - Use get_installed_apps() when the user asks what apps are installed.
 - Use input_text to type. Do NOT tap on autocomplete suggestions.
 - Never say you cannot access the user's clipboard, notifications, or phone state when a matching tool exists. Use the tool first.
+- Reply in the same language the user used by default. Tool names and parameter keys must remain English. Chinese phone tasks must still prefer deterministic phone tools when available.
 - Do NOT auto-fill passwords, confirm payments, or delete data."""
 
         /** Maximum number of retries on LLM API call failure */
@@ -433,6 +434,10 @@ class DefaultAgentService : AgentService {
         }
     }
 
+    private fun String.containsAny(vararg values: String): Boolean {
+        return values.any { contains(it) }
+    }
+
     // ==================== Main Execution Loop ====================
 
     private fun runAgentLoop(userPrompt: String, callback: AgentCallback) {
@@ -511,7 +516,13 @@ class DefaultAgentService : AgentService {
             lowerPrompt.contains("check ") || lowerPrompt.contains("compose ") ||
             lowerPrompt.contains("find ") || lowerPrompt.contains("screen") ||
             lowerPrompt.contains("notification") || lowerPrompt.contains("read my") ||
-            lowerPrompt.contains("call ") || lowerPrompt.contains("dial ")
+            lowerPrompt.contains("call ") || lowerPrompt.contains("dial ") ||
+            lowerPrompt.containsAny(
+                "打开", "发送", "搜索", "查找", "点击", "安装", "播放", "查看",
+                "读取", "关闭", "滑动", "滚动", "监控", "自动回复", "写邮件",
+                "返回", "回主页", "截图", "拨打", "打电话", "发短信", "设置闹钟",
+                "计时器", "屏幕", "通知", "剪贴板", "电量", "存储", "蓝牙", "无线网"
+            )
 
         val enrichedPrompt = if (looksLikeTask) {
             try {

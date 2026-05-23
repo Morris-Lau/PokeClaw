@@ -50,7 +50,7 @@ class ThemeActivity : BaseActivity() {
         (contentFrame?.getChildAt(0) as? android.view.View)?.setBackgroundColor(tc.bg)
 
         findViewById<CommonToolbar>(R.id.toolbar).apply {
-            setTitle("Appearance")
+            setTitle(getString(R.string.theme_appearance_title))
             setTitleColor(tc.aiText)
             setBackgroundColor(tc.toolbarBg)
             showBackButton(true) { finish() }
@@ -108,7 +108,7 @@ class ThemeActivity : BaseActivity() {
             cornerRadius = dp(6f)
         }
 
-        name.text = theme.name
+        name.text = themeDisplayName(theme)
 
         view.setOnClickListener {
             selectedThemeId = theme.id
@@ -149,8 +149,12 @@ class ThemeActivity : BaseActivity() {
         }
 
         val current = themes.find { it.id == selectedThemeId }
-        val label = current?.name ?: selectedThemeId
-        findViewById<TextView>(R.id.tvCurrentTheme).text = "Current: $label"
+        val label = current?.let { themeDisplayName(it) } ?: selectedThemeId
+        findViewById<TextView>(R.id.tvCurrentTheme).text = getString(R.string.theme_current, label)
+    }
+
+    private fun themeDisplayName(theme: ThemeConfig): String {
+        return getString(if (theme.isDark) R.string.theme_dark else R.string.theme_light)
     }
 
     private fun roundRect(color: Int, radius: Float) = GradientDrawable().apply {

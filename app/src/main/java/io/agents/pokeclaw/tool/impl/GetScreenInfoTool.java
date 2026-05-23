@@ -5,6 +5,7 @@ package io.agents.pokeclaw.tool.impl;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.service.ClawAccessibilityService;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
@@ -53,7 +54,9 @@ public class GetScreenInfoTool extends BaseTool {
     public ToolResult execute(Map<String, Object> params) {
         ClawAccessibilityService service = requireAccessibilityService();
         if (service == null) {
-            return ToolResult.error("Accessibility service is not running");
+            return ToolResult.error(AppLocaleManager.INSTANCE.shouldUseChinese(ClawApplication.Companion.getInstance())
+                    ? "无障碍服务未运行"
+                    : "Accessibility service is not running");
         }
         String tree = useFullTree ? service.getScreenTreeFull() : service.getScreenTree();
         if (tree == null) {

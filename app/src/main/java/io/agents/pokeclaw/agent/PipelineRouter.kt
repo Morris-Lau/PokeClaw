@@ -48,7 +48,10 @@ class PipelineRouter(private val context: Context) {
         // Compound tasks (containing "and", "then", "after") should go to agent loop,
         // not be partially handled by Tier 1 deterministic matching.
         val lower = task.lowercase()
-        if (lower.contains(" and ") || lower.contains(" then ") || lower.contains(" after ")) {
+        if (lower.contains(" and ") || lower.contains(" then ") || lower.contains(" after ") ||
+            lower.contains("然后") || lower.contains("然後") || lower.contains("之后") ||
+            lower.contains("之後") || lower.contains("并且") || lower.contains("並且") ||
+            lower.contains("，再") || lower.contains(" 再 ")) {
             XLog.i(TAG, "Compound task detected, skipping Tier 1: $task")
             return Route.AgentLoop(task)
         }

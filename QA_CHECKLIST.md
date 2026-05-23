@@ -694,6 +694,12 @@ When in doubt, rerun the smaller bundle first, then expand only if something dri
 - [ ] **H7. Delete chat**: long-press session in sidebar → delete → session removed from sidebar + file deleted
 - [ ] **H8. Rename preserves messages**: rename session → open it → all messages still there
 - [ ] **H9. Delete correct session**: have 3+ sessions → delete middle one → other sessions unaffected
+- [ ] **H10. App language setting**: Settings → Appearance → Language → choose `简体中文` → Settings/chat labels switch to Chinese → choose `English` → labels switch back → choose `System default` → app follows device locale after relaunch. Verify via ADB:
+  ```bash
+  adb shell am start -n io.agents.pokeclaw/io.agents.pokeclaw.ui.chat.ComposeChatActivity
+  adb shell uiautomator dump /sdcard/ui.xml
+  adb shell cat /sdcard/ui.xml | grep -E "简体中文|Language|语言|设置|Settings"
+  ```
 
 ## I. Cross-App Behavior
 
@@ -768,6 +774,12 @@ Design principle: User perspective. INFO tasks → report actual data. ACTION ta
 - [ ] **DD5. Installed apps question uses direct tool**: Cloud input `what apps do i have` → calls `get_installed_apps()`
 - [ ] **DD6. Screen reading uses direct tool**: Cloud input `what's on my screen right now` → calls `get_screen_info()`
 - [ ] **DD7. Conceptual control stays chat**: Cloud input `what is an Android clipboard` → normal text answer; guard must not falsely force a device-data tool
+- [ ] **DD8. Chinese battery uses direct tool**: Cloud or Local Task input `电量还剩多少` → calls `get_device_info(category="battery")`; must not open Settings
+- [ ] **DD9. Chinese clipboard uses direct tool**: Cloud or Local Task input `读取剪贴板` → calls `clipboard(action="get")`; empty clipboard is a valid answer
+- [ ] **DD10. Chinese notifications use direct tool**: Cloud or Local Task input `总结通知` → calls `get_notifications()`; missing Notification Access gives a clear permission message
+- [ ] **DD11. Chinese storage uses direct tool**: Cloud or Local Task input `手机存储还剩多少` → calls `get_device_info(category="storage")`
+- [ ] **DD12. Chinese installed apps use direct tool**: Cloud or Local Task input `我装了哪些应用` → calls `get_installed_apps()`
+- [ ] **DD13. Chinese screen reading uses direct tool**: Cloud or Local Task input `屏幕上有什么` → calls `get_screen_info()`
 
 ### Error Handling
 - [ ] **M39. Wrong app name**: "open flurpmaster 3000" → "App not found" + suggestion
@@ -786,6 +798,11 @@ Design principle: User perspective. INFO tasks → report actual data. ACTION ta
 - [ ] **M48. Lock**: "lock my phone" → system_key(lock), confirms
 - [ ] **M49. Clear notifications**: "clear all my notifications" → clears, confirms
 - [ ] **M50. Phone temp**: "how hot is my phone" → get_device_info(battery) temp OR graceful "not available"
+- [ ] **M51. Chinese open settings**: `打开设置` → opens Android Settings or PokeClaw Settings as intended by route, then reports the opened settings screen
+- [ ] **M52. Chinese back**: `返回` → calls `system_key(back)` when Accessibility is ready, or gives a visible permission message when it is missing
+- [ ] **M53. Chinese screenshot**: `截图` → calls `take_screenshot`; missing Accessibility or unsupported Android version returns a clear user-visible error
+- [ ] **M54. Chinese open app**: `打开 Chrome` → opens Chrome if installed, or reports that the app is not installed/found
+- [ ] **M55. Chinese SMS**: `给 1234567890 发短信` → opens SMS compose for that number; with a contact name instead of a number, routes to the agent loop or asks for clarification instead of silently failing
 
 ## R. Local LLM — Reasoning Quick Tasks (1-2 tool calls + LLM analysis)
 
@@ -928,6 +945,13 @@ Layer 1 broadcast bypasses UI routing. Only Layer 3 catches routing bugs.
 - [x] **Q7-3. App doesn't crash on stop**: start task → tap Stop → app remains running, no ANR, no crash
 - [x] **Q7-4. Send button resets after stop**: stop task → send button changes from red X back to arrow → can send new messages
 - [ ] **Q7-5. Second task after stop**: stop task 1 → start task 2 → task 2 executes normally (no "Agent is already running" error)
+
+### Q9. Chinese UI and Input E2E
+- [ ] **Q9-1. Chinese chat shell**: set Language to `简体中文` → chat toolbar, Local/Cloud labels, Chat/Task switch, placeholders, quick tasks, sidebar actions, and empty state show Chinese for primary user-facing text
+- [ ] **Q9-2. Chinese Settings shell**: set Language to `简体中文` → Settings groups, Appearance, Models, Remote Control, About actions, language row, and permission statuses show Chinese for primary user-facing text
+- [ ] **Q9-3. Chinese Models shell**: set Language to `简体中文` → Models page active/default sections, cloud config, download/use actions, and error toasts show Chinese for primary user-facing text
+- [ ] **Q9-4. Chinese task input bridge**: Chinese mode → Cloud tab or Local Task mode → type `电量还剩多少` by ADB tap/text or broadcast → answer appears as a visible assistant bubble in the same chatroom
+- [ ] **Q9-5. English override**: device locale Chinese + app Language `English` → relaunch → PokeClaw primary UI stays English while Chinese task inputs still route correctly
 - [ ] **Q7-6. Stop from floating button**: task running in other app → tap floating circle → "Tap to stop" → task stops, returns to PokeClaw
 - [ ] **Q7-7. Auto-return preserves conversation**: task completes in other app → auto-return to PokeClaw → previous messages + task result visible in same conversation
 
@@ -1029,6 +1053,18 @@ Layer 1 broadcast bypasses UI routing. Only Layer 3 catches routing bugs.
 ## QA Debug Changelog
 
 Format: `[date] [status] [test-id] description`
+
+### 2026-05-24 — Simplified Chinese support + language setting
+
+[2026-05-24] [PASS]    Build  `./gradlew assembleDebug` passed and installed `PokeClaw_v0.6.12_20260524_024912.apk` on Pixel 9 Pro `4B061FDAP00257`.
+[2026-05-24] [PASS]    Resource parity  `values`, `values-zh`, and `values-ja` each contain 409 string keys.
+[2026-05-24] [PASS]    H10  Settings -> Appearance -> Language showed `跟随系统` / `English` / `简体中文`; UI switched Chinese -> English -> System default -> Chinese, and Simplified Chinese persisted after force-stop + relaunch.
+[2026-05-24] [PASS]    Q9-1/Q9-2/Q9-3  Chinese mode ADB dumps verified primary chat, Settings, and Models text in Simplified Chinese; technical labels/provider/model names such as `API Key`, `Base URL`, `Custom`, `RAM`, and concrete model names remain English by design.
+[2026-05-24] [PASS]    DD8-DD12  ADB task broadcasts routed Chinese prompts to deterministic tools before LLM/accessibility gates: battery -> `get_device_info(category=battery)`, clipboard -> `clipboard(action=get)`, notifications -> `get_notifications`, storage -> `get_device_info(category=storage)`, installed apps -> `get_installed_apps`.
+[2026-05-24] [PASS]    DD13  `屏幕上有什么` routed to `get_screen_info`; with Accessibility off, the visible result was the expected Chinese error `无障碍服务未运行`.
+[2026-05-24] [PASS]    M51-M55  Chinese action prompts entered Tier 1: `打开设置` direct intent opened Android Settings; `返回` called `system_key(back)` and returned Chinese missing-accessibility error; `截图` called `take_screenshot` and returned Chinese missing-accessibility error; `打开 Chrome` resolved Chrome and opened `com.android.chrome`; `给 1234567890 发短信` opened Messages compose via `SENDTO`.
+[2026-05-24] [PASS]    K2  Settings permission section showed Notification Access row with localized connected status.
+[2026-05-24] [SKIP]    Q2/Q3/K6/full-A-K sweep  Full tab-send routing, all permission-row link taps, and the full release checklist were not rerun in this session; focused affected-section ADB/uiautomator E2E and build/install/crash verification were completed.
 
 ### 2026-04-08 — Initial QA run
 

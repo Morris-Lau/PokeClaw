@@ -3,10 +3,13 @@
 
 package io.agents.pokeclaw.tool.impl;
 
+import android.content.Context;
+import android.content.Intent;
 import android.view.accessibility.AccessibilityNodeInfo;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.service.ClawAccessibilityService;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
@@ -59,7 +62,7 @@ public class OpenAppTool extends BaseTool {
 
     @Override
     public String getDescriptionCN() {
-        return "Open an app by package name (e.g. 'com.android.settings').";
+        return "按应用名称或包名打开应用，例如 Chrome 或 com.android.settings。";
     }
 
     @Override
@@ -71,13 +74,10 @@ public class OpenAppTool extends BaseTool {
 
     @Override
     public ToolResult execute(Map<String, Object> params) {
-        ClawAccessibilityService service = requireAccessibilityService();
-        if (service == null) {
-            return ToolResult.error("Accessibility service is not running");
-        }
         String packageName = params.containsKey("package_name")
                 ? requireString(params, "package_name")
                 : requireString(params, "app_name");
+        String originalName = packageName;
 
         // If LLM sends app name instead of package name, resolve it
         if (!packageName.contains(".")) {
@@ -88,15 +88,54 @@ public class OpenAppTool extends BaseTool {
             }
         }
 
+        ClawAccessibilityService service = requireAccessibilityService();
+        if (service == null) {
+            return launchWithPackageManager(packageName, originalName);
+        }
+
         boolean success = service.openApp(packageName);
         if (!success) {
-            return ToolResult.error("Failed to open app: " + packageName + ". Make sure the app is installed.");
+            ToolResult fallback = launchWithPackageManager(packageName, originalName);
+            if (!fallback.isSuccess()) {
+                return fallback;
+            }
+            return fallback;
         }
 
         // Wait for possible chain-launch intercept dialog and auto-click "Allow"
         dismissChainLaunchDialog(service);
 
-        return ToolResult.success("Opened app: " + packageName);
+        return ToolResult.success(openedMessage(packageName));
+    }
+
+    private ToolResult launchWithPackageManager(String packageName, String originalName) {
+        Context context = ClawApplication.Companion.getInstance();
+        boolean chinese = AppLocaleManager.INSTANCE.shouldUseChinese(context);
+        try {
+            Intent intent = context.getPackageManager().getLaunchIntentForPackage(packageName);
+            if (intent == null) {
+                String target = originalName == null || originalName.trim().isEmpty() ? packageName : originalName;
+                return ToolResult.error(chinese
+                        ? "未找到应用：" + target
+                        : "App not found: " + target);
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            context.startActivity(intent);
+            XLog.i(TAG, "Launched app via PackageManager: " + packageName);
+            return ToolResult.success(openedMessage(packageName));
+        } catch (Exception e) {
+            XLog.w(TAG, "Failed to launch app via PackageManager: " + packageName, e);
+            return ToolResult.error(chinese
+                    ? "无法打开应用：" + originalName
+                    : "Failed to open app: " + originalName);
+        }
+    }
+
+    private String openedMessage(String packageName) {
+        Context context = ClawApplication.Companion.getInstance();
+        return AppLocaleManager.INSTANCE.shouldUseChinese(context)
+                ? "已打开应用：" + packageName
+                : "Opened app: " + packageName;
     }
 
     /**

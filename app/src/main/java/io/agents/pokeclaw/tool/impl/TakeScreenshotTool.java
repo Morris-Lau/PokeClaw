@@ -7,6 +7,7 @@ import android.graphics.Bitmap;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.service.ClawAccessibilityService;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
@@ -48,13 +49,14 @@ public class TakeScreenshotTool extends BaseTool {
     @Override
     public ToolResult execute(Map<String, Object> params) {
         ClawAccessibilityService service = requireAccessibilityService();
+        boolean chinese = AppLocaleManager.INSTANCE.shouldUseChinese(ClawApplication.Companion.getInstance());
         if (service == null) {
-            return ToolResult.error("Accessibility service is not running");
+            return ToolResult.error(chinese ? "无障碍服务未运行" : "Accessibility service is not running");
         }
 
         Bitmap bitmap = service.takeScreenshot(5000);
         if (bitmap == null) {
-            return ToolResult.error("Failed to take screenshot. Requires Android 11+ (API 30).");
+            return ToolResult.error(chinese ? "截图失败，需要 Android 11+（API 30）。" : "Failed to take screenshot. Requires Android 11+ (API 30).");
         }
 
         try {
@@ -75,10 +77,10 @@ public class TakeScreenshotTool extends BaseTool {
             }
             bitmap.recycle();
 
-            return ToolResult.success(file.getAbsolutePath());
+            return ToolResult.success(chinese ? "截图已保存：" + file.getAbsolutePath() : file.getAbsolutePath());
         } catch (Exception e) {
             bitmap.recycle();
-            return ToolResult.error("Failed to save screenshot: " + e.getMessage());
+            return ToolResult.error(chinese ? "保存截图失败：" + e.getMessage() : "Failed to save screenshot: " + e.getMessage());
         }
     }
 }

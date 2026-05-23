@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.service.notification.StatusBarNotification;
 
 import io.agents.pokeclaw.ClawApplication;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.service.ClawNotificationListener;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
@@ -52,14 +53,17 @@ public class GetNotificationsTool extends BaseTool {
 
     @Override
     public ToolResult execute(Map<String, Object> params) {
+        boolean chinese = AppLocaleManager.INSTANCE.shouldUseChinese(ClawApplication.Companion.getInstance());
         if (!ClawNotificationListener.isConnected()) {
-            return ToolResult.error("Notification Access is not enabled. Ask the user to enable it in Settings.");
+            return ToolResult.error(chinese
+                    ? "通知访问权限未开启，请引导用户到设置中开启。"
+                    : "Notification Access is not enabled. Ask the user to enable it in Settings.");
         }
 
         try {
             StatusBarNotification[] notifications = ClawNotificationListener.getActiveNotificationList();
             if (notifications == null || notifications.length == 0) {
-                return ToolResult.success("No active notifications.");
+                return ToolResult.success(chinese ? "当前没有通知。" : "No active notifications.");
             }
 
             StringBuilder sb = new StringBuilder();
@@ -84,7 +88,7 @@ public class GetNotificationsTool extends BaseTool {
 
                 count++;
                 long when = notif.when;
-                String timeAgo = formatTimeAgo(when);
+                String timeAgo = formatTimeAgo(when, chinese);
                 String pkg = sbn.getPackageName();
                 String appLabel = getAppLabel(pkg);
 
@@ -102,13 +106,13 @@ public class GetNotificationsTool extends BaseTool {
                 sb.append("\n");
 
                 if (count >= 15) {
-                    sb.append("... and more notifications\n");
+                    sb.append(chinese ? "... 还有更多通知\n" : "... and more notifications\n");
                     break;
                 }
             }
 
             if (count == 0) {
-                return ToolResult.success("No active notifications (only PokeClaw system notifications present).");
+                return ToolResult.success(chinese ? "当前没有通知（只有 PokeClaw 系统通知）。" : "No active notifications (only PokeClaw system notifications present).");
             }
 
             XLog.d(TAG, "Read " + count + " notifications");
@@ -116,21 +120,21 @@ public class GetNotificationsTool extends BaseTool {
 
         } catch (Exception e) {
             XLog.e(TAG, "Failed to read notifications", e);
-            return ToolResult.error("Failed to read notifications: " + e.getMessage());
+            return ToolResult.error(chinese ? "读取通知失败：" + e.getMessage() : "Failed to read notifications: " + e.getMessage());
         }
     }
 
-    private String formatTimeAgo(long whenMs) {
-        if (whenMs == 0) return "just now";
+    private String formatTimeAgo(long whenMs, boolean chinese) {
+        if (whenMs == 0) return chinese ? "刚刚" : "just now";
         long diff = System.currentTimeMillis() - whenMs;
-        if (diff < 0) return "just now";
+        if (diff < 0) return chinese ? "刚刚" : "just now";
         long minutes = diff / 60_000;
-        if (minutes < 1) return "just now";
-        if (minutes < 60) return minutes + " min ago";
+        if (minutes < 1) return chinese ? "刚刚" : "just now";
+        if (minutes < 60) return chinese ? minutes + " 分钟前" : minutes + " min ago";
         long hours = minutes / 60;
-        if (hours < 24) return hours + "h ago";
+        if (hours < 24) return chinese ? hours + " 小时前" : hours + "h ago";
         long days = hours / 24;
-        return days + "d ago";
+        return chinese ? days + " 天前" : days + "d ago";
     }
 
     private String getAppLabel(String packageName) {

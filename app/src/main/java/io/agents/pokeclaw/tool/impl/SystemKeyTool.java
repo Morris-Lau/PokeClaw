@@ -5,6 +5,7 @@ package io.agents.pokeclaw.tool.impl;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.service.ClawAccessibilityService;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
@@ -52,8 +53,9 @@ public class SystemKeyTool extends BaseTool {
     @Override
     public ToolResult execute(Map<String, Object> params) {
         ClawAccessibilityService service = requireAccessibilityService();
+        boolean chinese = AppLocaleManager.INSTANCE.shouldUseChinese(ClawApplication.Companion.getInstance());
         if (service == null) {
-            return ToolResult.error("Accessibility service is not running");
+            return ToolResult.error(chinese ? "无障碍服务未运行" : "Accessibility service is not running");
         }
 
         String key = requireString(params, "key");
@@ -63,51 +65,53 @@ public class SystemKeyTool extends BaseTool {
         switch (key) {
             case "back":
                 success = service.pressBack();
-                successMsg = "Pressed Back button";
+                successMsg = chinese ? "已返回" : "Pressed Back button";
                 break;
             case "home":
                 success = service.pressHome();
-                successMsg = "Pressed Home button";
+                successMsg = chinese ? "已回到主页" : "Pressed Home button";
                 break;
             case "recent_apps":
                 success = service.openRecentApps();
-                successMsg = "Opened recent apps";
+                successMsg = chinese ? "已打开最近任务" : "Opened recent apps";
                 break;
             case "notifications":
                 success = service.expandNotifications();
-                successMsg = "Expanded notifications";
+                successMsg = chinese ? "已展开通知栏" : "Expanded notifications";
                 break;
             case "collapse_notifications":
                 success = service.collapseNotifications();
-                successMsg = "Collapsed notifications";
+                successMsg = chinese ? "已收起通知栏" : "Collapsed notifications";
                 break;
             case "lock_screen":
                 success = service.lockScreen();
-                successMsg = "Screen locked";
+                successMsg = chinese ? "已锁屏" : "Screen locked";
                 break;
             case "unlock_screen":
                 success = service.unlockScreen();
-                successMsg = "Screen unlock requested";
+                successMsg = chinese ? "已请求解锁屏幕" : "Screen unlock requested";
                 break;
             case "enter":
                 try {
                     Runtime.getRuntime().exec(new String[]{"input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_ENTER)}).waitFor();
                     success = true;
                 } catch (Exception e) { success = false; }
-                successMsg = "Pressed Enter key";
+                successMsg = chinese ? "已按下回车键" : "Pressed Enter key";
                 break;
             case "tab":
                 try {
                     Runtime.getRuntime().exec(new String[]{"input", "keyevent", String.valueOf(android.view.KeyEvent.KEYCODE_TAB)}).waitFor();
                     success = true;
                 } catch (Exception e) { success = false; }
-                successMsg = "Pressed Tab key";
+                successMsg = chinese ? "已按下 Tab 键" : "Pressed Tab key";
                 break;
             default:
-                return ToolResult.error("Unknown system key: " + key + ". Must be one of: back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen, enter, tab.");
+                return ToolResult.error(chinese
+                        ? "未知系统按键：" + key + "。必须是：back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen, enter, tab。"
+                        : "Unknown system key: " + key + ". Must be one of: back, home, recent_apps, notifications, collapse_notifications, lock_screen, unlock_screen, enter, tab.");
         }
 
         return success ? ToolResult.success(successMsg)
-                : ToolResult.error("Failed to execute " + key);
+                : ToolResult.error(chinese ? "执行 " + key + " 失败" : "Failed to execute " + key);
     }
 }

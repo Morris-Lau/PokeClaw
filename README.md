@@ -194,10 +194,11 @@ Every number below comes from repeated trials on a physical Pixel 8 Pro running 
 | Check my Instagram messages | ✅ | 5 | Handles typo ("instagarm"), opens correct app |
 | 部機仲有幾多storage | ✅ | 2 | Cantonese input, returns answer in 中文 |
 | 打開Instagram | ✅ | varies | Chinese command |
+| 电量还剩多少 | ✅ | 0 | Simplified Chinese direct-device data, deterministic battery tool |
 | Draft an email saying I'll be late | ✅ **10/10** | 8 | Repeated trials: 100% pass rate |
 | Copy latest email subject and Google it | ✅ **8/10** | 15 | Gmail to Chrome cross-app flow, 80% pass rate |
 
-All tasks use zero hardcoded app logic. The model reads the screen, picks tools, and figures out the flow on its own. Multi-language works out of the box, including Cantonese, Mandarin, and misspelled English.
+All tasks use zero hardcoded app logic. The model reads the screen, picks tools, and figures out the flow on its own. Multi-language works out of the box, including Cantonese, Mandarin, and misspelled English. The Android app also includes an in-app language setting for System default, English, and Simplified Chinese, with Simplified Chinese UI strings and deterministic Chinese task routing for common device-data and phone-action requests.
 
 ### Local (Gemma 4 E2B, fully on-device) — verified on CPU and GPU
 
@@ -419,6 +420,11 @@ PokeClaw is moving fast, and the roadmap is being shaped directly by real device
 Every star helps more people find the project. Every issue helps shape the next release.
 
 ## Changelog
+
+### Unreleased
+- **Simplified Chinese support is now end-to-end.** The app can switch between System default, English, and 简体中文; the main chat, Settings, Models, task flow, and notification surfaces use localized strings.
+- **Chinese device-data prompts use deterministic tools.** Requests such as `电量还剩多少`, `读取剪贴板`, `总结通知`, `手机存储还剩多少`, `我装了哪些应用`, and `屏幕上有什么` route to phone tools before the LLM path.
+- **Chinese direct actions are recognized.** Commands such as `打开设置`, `返回`, `截图`, `打开 Chrome`, and `给 1234567890 发短信` now enter the Tier 1 direct intent/tool path.
 
 ### v0.6.12 (2026-04-30)
 - **Hotfix for Android background activity launch limits.** External automation now has an exported activity entrypoint for MacroDroid, Tasker, and Locale-style apps, avoiding Android 16 / targetSdk 36 background launch blocking when a broadcast receiver tries to open the chatroom.

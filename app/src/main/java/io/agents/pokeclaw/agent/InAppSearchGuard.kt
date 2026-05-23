@@ -103,6 +103,14 @@ internal class InAppSearchGuard private constructor(
             """^\s*search\s+for\s+(.+?)\s+(?:on|in)\s+(.+?)\s*$""",
             RegexOption.IGNORE_CASE
         )
+        private val SEARCH_CHINESE_APP_FOR_QUERY = Regex(
+            """^\s*(?:在|用)?\s*(.+?)\s*(?:里|中|內|内)?\s*搜索\s+(.+?)\s*$""",
+            RegexOption.IGNORE_CASE
+        )
+        private val SEARCH_CHINESE_QUERY_IN_APP = Regex(
+            """^\s*搜索\s+(.+?)\s*(?:在|用)\s*(.+?)\s*$""",
+            RegexOption.IGNORE_CASE
+        )
 
         fun fromTask(task: String): InAppSearchGuard {
             val trimmed = task.trim()
@@ -117,6 +125,16 @@ internal class InAppSearchGuard private constructor(
                     query = sanitizeQuery(it.groupValues[2])
                 )
             } ?: SEARCH_QUERY_ON_APP.matchEntire(task)?.let {
+                ParsedParts(
+                    appName = sanitizeAppName(it.groupValues[2]),
+                    query = sanitizeQuery(it.groupValues[1])
+                )
+            } ?: SEARCH_CHINESE_APP_FOR_QUERY.matchEntire(task)?.let {
+                ParsedParts(
+                    appName = sanitizeAppName(it.groupValues[1]),
+                    query = sanitizeQuery(it.groupValues[2])
+                )
+            } ?: SEARCH_CHINESE_QUERY_IN_APP.matchEntire(task)?.let {
                 ParsedParts(
                     appName = sanitizeAppName(it.groupValues[2]),
                     query = sanitizeQuery(it.groupValues[1])
@@ -139,6 +157,8 @@ internal class InAppSearchGuard private constructor(
                 .removePrefix("The ")
                 .removeSuffix(" app")
                 .removeSuffix(" App")
+                .removeSuffix("应用")
+                .removeSuffix("應用")
                 .trim()
         }
 

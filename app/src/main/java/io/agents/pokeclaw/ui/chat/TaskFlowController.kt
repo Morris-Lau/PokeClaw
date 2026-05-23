@@ -14,6 +14,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import io.agents.pokeclaw.AppCapabilityCoordinator
 import io.agents.pokeclaw.AppViewModel
+import io.agents.pokeclaw.R
 import io.agents.pokeclaw.ServiceBindingState
 import io.agents.pokeclaw.TaskEvent
 import io.agents.pokeclaw.agent.DirectDeviceDataGuard
@@ -63,15 +64,17 @@ class TaskFlowController(
 
     fun sendTask(text: String) {
         if (appViewModel.isTaskRunning()) {
-            addSystem("Another task is still running. Stop it first.")
-            onTaskTerminal?.invoke(TaskEvent.Failed("Another task is still running. Stop it first."))
+            val message = activity.getString(R.string.task_another_running)
+            addSystem(message)
+            onTaskTerminal?.invoke(TaskEvent.Failed(message))
             return
         }
 
         if (ModelConfigRepository.snapshot().isLocalActive() && isLikelyMonitorRequest(text)) {
             addUser(text)
-            addSystem("Local mode starts monitoring from the Background card. Open Background, choose the app/contact, then tap Start Monitoring.")
-            onTaskTerminal?.invoke(TaskEvent.Failed("Local mode starts monitoring from the Background card."))
+            val message = activity.getString(R.string.task_local_monitor_guidance)
+            addSystem(message)
+            onTaskTerminal?.invoke(TaskEvent.Failed(message))
             return
         }
 
@@ -92,11 +95,11 @@ class TaskFlowController(
                 if (canRunWithoutAccessibility(text)) {
                     XLog.i(TAG, "sendTask: allowing non-interactive task without Accessibility")
                 } else {
-                Toast.makeText(activity, "Enable Accessibility Service to run tasks", Toast.LENGTH_LONG).show()
-                addSystem("⚠️ Task mode needs Accessibility Service enabled. Opening Settings...")
+                Toast.makeText(activity, R.string.task_enable_accessibility_to_run, Toast.LENGTH_LONG).show()
+                addSystem(activity.getString(R.string.task_accessibility_needed_opening_settings))
                 openSettings()
                 sendTaskRetryCount = 0
-                onTaskTerminal?.invoke(TaskEvent.Failed("Accessibility Service is required for this task."))
+                onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_accessibility_required)))
                 return
                 }
             }
@@ -111,25 +114,25 @@ class TaskFlowController(
                     XLog.i(TAG, "sendTask: allowing non-interactive task while Accessibility connects")
                 } else {
                 if (sendTaskRetryCount >= 1) {
-                    Toast.makeText(activity, "Accessibility service not connected. Try toggling it off and on.", Toast.LENGTH_LONG).show()
-                    addSystem("Accessibility service didn't connect. Try toggling it off and on in Settings.")
+                    Toast.makeText(activity, R.string.task_accessibility_not_connected, Toast.LENGTH_LONG).show()
+                    addSystem(activity.getString(R.string.task_accessibility_toggle_settings))
                     openSettings()
                     sendTaskRetryCount = 0
-                    onTaskTerminal?.invoke(TaskEvent.Failed("Accessibility service did not connect."))
+                    onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_accessibility_not_connected)))
                     return
                 }
                 sendTaskRetryCount++
-                addSystem("Accessibility service connecting, please wait...")
+                addSystem(activity.getString(R.string.task_accessibility_connecting))
                 executor.submit {
                     val connected = ClawAccessibilityService.awaitRunning(5000)
                     activity.runOnUiThread {
                         if (connected) {
                             sendTask(text)
                         } else {
-                            Toast.makeText(activity, "Accessibility service didn't connect", Toast.LENGTH_LONG).show()
-                            addSystem("Accessibility service didn't connect. Go to Settings and toggle it off then on.")
+                            Toast.makeText(activity, R.string.task_accessibility_not_connected, Toast.LENGTH_LONG).show()
+                            addSystem(activity.getString(R.string.task_accessibility_go_toggle))
                             sendTaskRetryCount = 0
-                            onTaskTerminal?.invoke(TaskEvent.Failed("Accessibility service did not connect."))
+                            onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_accessibility_not_connected)))
                         }
                     }
                 }
@@ -146,11 +149,11 @@ class TaskFlowController(
                 if (canRunWithoutAccessibility(text)) {
                     XLog.i(TAG, "sendTask: allowing non-interactive task while Accessibility is degraded")
                 } else {
-                    Toast.makeText(activity, "Accessibility service disconnected. Open Settings and toggle it back on.", Toast.LENGTH_LONG).show()
-                    addSystem("Accessibility service disconnected. Open Settings and toggle it off then on.")
+                    Toast.makeText(activity, R.string.task_accessibility_disconnected, Toast.LENGTH_LONG).show()
+                    addSystem(activity.getString(R.string.task_accessibility_disconnected_toggle))
                     openSettings()
                     sendTaskRetryCount = 0
-                    onTaskTerminal?.invoke(TaskEvent.Failed("Accessibility service is disconnected."))
+                    onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_accessibility_disconnected)))
                     return
                 }
             }
@@ -163,8 +166,8 @@ class TaskFlowController(
         uiState.isTaskRunning.value = false
 
         if (!KVUtils.hasLlmConfig()) {
-            Toast.makeText(activity, "Configure LLM in Settings first", Toast.LENGTH_LONG).show()
-            onTaskTerminal?.invoke(TaskEvent.Failed("Configure LLM in Settings first."))
+            Toast.makeText(activity, R.string.task_configure_llm_first, Toast.LENGTH_LONG).show()
+            onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_configure_llm_first)))
             return
         }
 
@@ -187,7 +190,7 @@ class TaskFlowController(
                     }
                 } catch (e: Exception) {
                     XLog.e(TAG, "sendTask failed: ${e.message}", e)
-                    addSystem("Error: ${e.message}")
+                    addSystem(activity.getString(R.string.task_error_prefix, e.message ?: ""))
                     cleanupAfterTask()
                 }
             }
@@ -203,9 +206,15 @@ class TaskFlowController(
 
         executor.submit {
             try {
+                XLog.i(TAG, "executeDirectToolTask: tool=${toolCall.toolName}, params=${toolCall.params}")
                 val result = ToolRegistry.getInstance().executeTool(toolCall.toolName, toolCall.params)
                 activity.runOnUiThread {
-                    val answer = result.data ?: result.error ?: "Done."
+                    val answer = result.data ?: result.error ?: activity.getString(R.string.task_done)
+                    if (result.isSuccess) {
+                        XLog.i(TAG, "executeDirectToolTask: success tool=${toolCall.toolName}")
+                    } else {
+                        XLog.w(TAG, "executeDirectToolTask: failed tool=${toolCall.toolName}, error=${result.error}")
+                    }
                     replaceTypingIndicator(answer)
                     onTaskTerminal?.invoke(TaskEvent.Completed(answer))
                     cleanupAfterTask()
@@ -213,8 +222,8 @@ class TaskFlowController(
             } catch (e: Exception) {
                 XLog.e(TAG, "executeDirectToolTask failed: ${e.message}", e)
                 activity.runOnUiThread {
-                    replaceTypingIndicator("Error: ${e.message}")
-                    onTaskTerminal?.invoke(TaskEvent.Failed(e.message ?: "Direct tool failed"))
+                    replaceTypingIndicator(activity.getString(R.string.task_error_prefix, e.message ?: ""))
+                    onTaskTerminal?.invoke(TaskEvent.Failed(e.message ?: activity.getString(R.string.task_direct_tool_failed)))
                     cleanupAfterTask()
                 }
             }
@@ -227,6 +236,7 @@ class TaskFlowController(
         }
         return when (pipelineRouter.route(text)) {
             is PipelineRouter.Route.DirectIntent -> true
+            is PipelineRouter.Route.DirectTool -> true
             else -> false
         }
     }
@@ -235,7 +245,7 @@ class TaskFlowController(
         val target = MonitorTargetParser.fromTaskText(text)
         if (target == null) {
             addUser(text)
-            addSystem("Could not figure out who to monitor. Try: \"Monitor Mom on WhatsApp\"")
+            addSystem(activity.getString(R.string.task_monitor_parse_failed))
             return
         }
 
@@ -245,7 +255,7 @@ class TaskFlowController(
     fun startMonitor(target: MonitorTargetSpec, typedInput: String? = null) {
         val trimmedLabel = target.label.trim()
         if (trimmedLabel.isEmpty()) {
-            addSystem("Could not figure out who to monitor. Try: \"Monitor Mom on WhatsApp\"")
+            addSystem(activity.getString(R.string.task_monitor_parse_failed))
             return
         }
 
@@ -254,11 +264,11 @@ class TaskFlowController(
         if (missing.isNotEmpty()) {
             Toast.makeText(
                 activity,
-                "Enable ${missing.joinToString(" & ") { it.label }} in Settings first",
+                activity.getString(R.string.task_enable_missing_requirements, missing.joinToString(" & ") { it.label }),
                 Toast.LENGTH_LONG
             ).show()
             openSettings()
-            onTaskTerminal?.invoke(TaskEvent.Failed("Missing required permissions for monitoring."))
+            onTaskTerminal?.invoke(TaskEvent.Failed(activity.getString(R.string.task_missing_monitor_permissions)))
             return
         }
 
@@ -266,7 +276,7 @@ class TaskFlowController(
         val app = target.app
         uiState.isAwaitingReply.value = false
         uiState.isTaskRunning.value = false
-        addSystem("Setting up auto-reply for $contact on $app...")
+        addSystem(activity.getString(R.string.task_setting_up_auto_reply, contact, app))
 
         val autoReplyManager = AutoReplyManager.getInstance()
         autoReplyManager.addTarget(contact, app)
@@ -276,7 +286,7 @@ class TaskFlowController(
         Handler(Looper.getMainLooper()).postDelayed({
             uiState.isAwaitingReply.value = false
             uiState.isTaskRunning.value = false
-            addSystem("✓ Auto-reply is now active for ${target.displayLabel}.\nMonitoring in background — you can stop anytime from the bar above.")
+            addSystem(activity.getString(R.string.task_auto_reply_active, target.displayLabel))
             XLog.i(TAG, "startMonitor: monitor active, staying in PokeClaw")
         }, 1500)
     }
@@ -291,7 +301,7 @@ class TaskFlowController(
                     checkAutoReplyConfirmation()
                 }
                 is TaskEvent.Failed -> {
-                    replaceTypingIndicator("Error: ${event.error}")
+                    replaceTypingIndicator(activity.getString(R.string.task_error_prefix, event.error))
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                 }
@@ -301,7 +311,7 @@ class TaskFlowController(
                     cleanupAfterTask()
                 }
                 is TaskEvent.Blocked -> {
-                    replaceTypingIndicator("Blocked by system dialog.")
+                    replaceTypingIndicator(activity.getString(R.string.task_blocked_by_system_dialog))
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                 }
@@ -316,7 +326,7 @@ class TaskFlowController(
                 is TaskEvent.ToolResult -> {
                     uiState.isAwaitingReply.value = false
                     uiState.isTaskRunning.value = true
-                    if (!event.success) addSystem("${event.toolName} failed")
+                    if (!event.success) addSystem(activity.getString(R.string.task_tool_failed, event.toolName))
                 }
                 is TaskEvent.Response -> {
                     uiState.isAwaitingReply.value = false
@@ -385,7 +395,7 @@ class TaskFlowController(
             lastMonitorStatusNote = null
             return
         }
-        val note = "✓ Auto-reply active for $contacts.\nMonitoring in background — stop from bar above."
+        val note = activity.getString(R.string.task_auto_reply_status, contacts)
         if (note == lastMonitorStatusNote) return
         addSystem(note)
         lastMonitorStatusNote = note
@@ -444,9 +454,13 @@ class TaskFlowController(
     private fun isLikelyMonitorRequest(text: String): Boolean {
         val lower = text.lowercase()
         val mentionsMonitor = lower.contains("monitor") ||
+            lower.contains("监控") ||
+            lower.contains("監控") ||
             lower.contains("auto-reply") ||
             lower.contains("auto reply") ||
-            lower.contains("autoreply")
+            lower.contains("autoreply") ||
+            lower.contains("自动回复") ||
+            lower.contains("自動回覆")
         val looksLikeWatchMessages = lower.contains("watch") &&
             (lower.contains("message") || lower.contains("messages") || lower.contains("reply"))
         return mentionsMonitor || looksLikeWatchMessages

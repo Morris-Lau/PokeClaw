@@ -554,6 +554,7 @@ Rules:
 - Use finish(summary) when task is complete
 - One tool per turn. Read screen after each action.
 - To message someone: use send_message(contact="Name", message="text", app="WhatsApp"). This handles everything automatically.
+- Reply in the same language the user used by default. Tool names and parameter keys must remain English. Chinese phone tasks must still prefer deterministic phone tools when available.
 - Do NOT try to navigate messaging apps manually — always use send_message tool instead."""
 
         // Pattern 1: Standard <tool_call>...</tool_call> tags (preferred format)

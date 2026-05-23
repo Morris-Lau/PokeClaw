@@ -3,6 +3,7 @@
 
 package io.agents.pokeclaw.base
 
+import android.content.Context
 import android.content.res.Configuration
 import android.content.res.Resources
 import android.os.Bundle
@@ -15,12 +16,19 @@ import androidx.core.view.updatePadding
 import com.blankj.utilcode.util.AdaptScreenUtils
 import com.blankj.utilcode.util.BarUtils
 import io.agents.pokeclaw.R
+import io.agents.pokeclaw.i18n.AppLocaleManager
 
 /**
  *
  * Screen adaptation uses pt; using dp on some devices causes toast line breaks at incorrect positions
  */
 open class BaseActivity : AppCompatActivity() {
+
+    private var localeSignatureAtCreate: String = ""
+
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocaleManager.wrap(newBase))
+    }
 
     override fun getResources(): Resources {
         val resources = super.getResources()
@@ -29,10 +37,20 @@ open class BaseActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        localeSignatureAtCreate = AppLocaleManager.localeSignature(this)
         applyStatusBarMode()
 
         // Handle status bar height uniformly - applied after layout is loaded
         applyStatusBarPadding()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val currentSignature = AppLocaleManager.localeSignature(this)
+        if (currentSignature != localeSignatureAtCreate) {
+            localeSignatureAtCreate = currentSignature
+            recreate()
+        }
     }
 
     /**

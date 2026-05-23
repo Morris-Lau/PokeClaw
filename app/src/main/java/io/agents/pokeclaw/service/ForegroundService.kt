@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import io.agents.pokeclaw.AppCapabilityCoordinator
 import io.agents.pokeclaw.R
 import io.agents.pokeclaw.ServiceBindingState
+import io.agents.pokeclaw.i18n.AppLocaleManager
 import io.agents.pokeclaw.utils.XLog
 
 /**
@@ -31,10 +32,6 @@ class ForegroundService : Service() {
         const val NOTIFICATION_ID = 1001
         private const val EXTRA_TITLE = "extra_title"
         private const val EXTRA_TEXT = "extra_text"
-        private const val DEFAULT_TASK_TITLE = "PokeClaw · Task in progress"
-        private const val DEFAULT_TASK_TEXT = "Running task..."
-        private const val DEFAULT_MONITOR_TITLE = "PokeClaw · Monitoring"
-        private const val DEGRADED_MONITOR_TITLE = "PokeClaw · Monitoring paused"
 
         private enum class ForegroundMode {
             IDLE,
@@ -59,7 +56,7 @@ class ForegroundService : Service() {
          */
         fun updateTaskStatus(context: Context, statusText: String) {
             _mode = ForegroundMode.TASK
-            showNotification(context, DEFAULT_TASK_TITLE, statusText)
+            showNotification(context, taskTitle(context), statusText)
         }
 
         /**
@@ -81,32 +78,33 @@ class ForegroundService : Service() {
             if (capabilities.notificationAccessState != ServiceBindingState.READY) {
                 return showNotification(
                     context,
-                    DEGRADED_MONITOR_TITLE,
+                    monitorPausedTitle(context),
                     if (capabilities.notificationAccessState == ServiceBindingState.CONNECTING) {
-                        "Notification Access reconnecting…"
+                        localized(context).getString(R.string.notification_access_reconnecting)
                     } else {
-                        "Notification Access disconnected"
+                        localized(context).getString(R.string.notification_access_disconnected)
                     }
                 )
             }
             if (capabilities.accessibilityState != ServiceBindingState.READY) {
                 return showNotification(
                     context,
-                    DEGRADED_MONITOR_TITLE,
+                    monitorPausedTitle(context),
                     if (capabilities.accessibilityState == ServiceBindingState.CONNECTING) {
-                        "Accessibility reconnecting…"
+                        localized(context).getString(R.string.notification_accessibility_reconnecting)
                     } else {
-                        "Accessibility disconnected"
+                        localized(context).getString(R.string.notification_accessibility_disconnected)
                     }
                 )
             }
             val contacts = manager.monitoredContacts.toList()
+            val localized = localized(context)
             val text = when (contacts.size) {
-                0 -> "Monitoring in background"
-                1 -> "Monitoring ${contacts.first()}"
-                else -> "Monitoring ${contacts.size} chats"
+                0 -> localized.getString(R.string.notification_monitor_background)
+                1 -> localized.getString(R.string.notification_monitor_one, contacts.first())
+                else -> localized.getString(R.string.notification_monitor_many, contacts.size)
             }
-            return showNotification(context, DEFAULT_MONITOR_TITLE, text)
+            return showNotification(context, monitorTitle(context), text)
         }
 
         fun syncToBackgroundState(context: Context): Boolean {
@@ -146,8 +144,8 @@ class ForegroundService : Service() {
          */
         fun start(
             context: Context,
-            title: String = context.getString(R.string.notification_content_title),
-            text: String = context.getString(R.string.notification_content_text)
+            title: String = taskTitle(context),
+            text: String = taskText(context)
         ): Boolean {
             // Android 13+ requires notification permission check
             if (!hasNotificationPermission(context)) {
@@ -206,6 +204,20 @@ class ForegroundService : Service() {
                 .setAutoCancel(false)
                 .build()
         }
+
+        private fun localized(context: Context): Context = AppLocaleManager.wrap(context)
+
+        private fun taskTitle(context: Context): String =
+            localized(context).getString(R.string.notification_content_title)
+
+        private fun taskText(context: Context): String =
+            localized(context).getString(R.string.notification_content_text)
+
+        private fun monitorTitle(context: Context): String =
+            localized(context).getString(R.string.notification_monitor_title)
+
+        private fun monitorPausedTitle(context: Context): String =
+            localized(context).getString(R.string.notification_monitor_paused_title)
     }
 
     private val healthHandler = Handler(Looper.getMainLooper())
@@ -226,7 +238,7 @@ class ForegroundService : Service() {
         if (hasNotificationPermission(this)) {
             startForeground(
                 NOTIFICATION_ID,
-                buildNotification(this, DEFAULT_TASK_TITLE, DEFAULT_TASK_TEXT)
+                buildNotification(this, taskTitle(this), taskText(this))
             )
         } else {
             stopSelf()
@@ -269,8 +281,8 @@ class ForegroundService : Service() {
     }
 
     private fun createNotification(intent: Intent?): Notification {
-        val title = intent?.getStringExtra(EXTRA_TITLE) ?: DEFAULT_TASK_TITLE
-        val text = intent?.getStringExtra(EXTRA_TEXT) ?: DEFAULT_TASK_TEXT
+        val title = intent?.getStringExtra(EXTRA_TITLE) ?: taskTitle(this)
+        val text = intent?.getStringExtra(EXTRA_TEXT) ?: taskText(this)
         return buildNotification(this, title, text)
     }
 }

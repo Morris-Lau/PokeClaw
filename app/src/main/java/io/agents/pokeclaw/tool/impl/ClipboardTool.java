@@ -12,6 +12,7 @@ import android.os.Looper;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
 import io.agents.pokeclaw.tool.ToolResult;
@@ -77,7 +78,7 @@ public class ClipboardTool extends BaseTool {
 
             boolean completed = ClipboardReaderActivity.latch.await(3, TimeUnit.SECONDS);
             if (!completed) {
-                return ToolResult.error("Clipboard read timed out");
+                return ToolResult.error(chinese(context) ? "读取剪贴板超时" : "Clipboard read timed out");
             }
 
             if (ClipboardReaderActivity.clipboardResult != null) {
@@ -86,9 +87,10 @@ public class ClipboardTool extends BaseTool {
             if (ClipboardReaderActivity.clipboardError != null) {
                 return ToolResult.error(ClipboardReaderActivity.clipboardError);
             }
-            return ToolResult.success("Clipboard is empty");
+            return ToolResult.success(chinese(context) ? "剪贴板为空" : "Clipboard is empty");
         } catch (Exception e) {
-            return ToolResult.error("Failed to read clipboard: " + e.getMessage());
+            Context context = ClawApplication.Companion.getInstance();
+            return ToolResult.error(chinese(context) ? "读取剪贴板失败：" + e.getMessage() : "Failed to read clipboard: " + e.getMessage());
         }
     }
 
@@ -115,7 +117,11 @@ public class ClipboardTool extends BaseTool {
         }
 
         return result[0]
-                ? ToolResult.success("Clipboard text set successfully")
-                : ToolResult.error("Failed to set clipboard text");
+                ? ToolResult.success(chinese(ClawApplication.Companion.getInstance()) ? "已写入剪贴板" : "Clipboard text set successfully")
+                : ToolResult.error(chinese(ClawApplication.Companion.getInstance()) ? "写入剪贴板失败" : "Failed to set clipboard text");
+    }
+
+    private boolean chinese(Context context) {
+        return AppLocaleManager.INSTANCE.shouldUseChinese(context);
     }
 }

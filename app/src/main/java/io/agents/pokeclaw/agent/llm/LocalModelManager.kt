@@ -5,6 +5,7 @@ package io.agents.pokeclaw.agent.llm
 
 import android.content.Context
 import android.os.StatFs
+import io.agents.pokeclaw.R
 import io.agents.pokeclaw.utils.XLog
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -179,9 +180,9 @@ object LocalModelManager {
         val modelPath = localConfig.modelPath
         if (modelPath.isBlank()) {
             return ActiveModelState(
-                displayName = "No model selected",
-                metaText = "Download a model below",
-                statusText = "● Not configured",
+                displayName = context.getString(R.string.models_no_model_selected_error),
+                metaText = context.getString(R.string.models_download_model_below),
+                statusText = context.getString(R.string.models_not_configured_dot),
                 statusKind = StatusKind.NEUTRAL,
             )
         }
@@ -191,11 +192,11 @@ object LocalModelManager {
             val availability = availabilityForModel(context, matchedModel, localConfig)
             return ActiveModelState(
                 displayName = matchedModel.displayName,
-                metaText = "${matchedModel.fileName} · On-device",
+                metaText = "${matchedModel.fileName} · ${context.getString(R.string.models_on_device)}",
                 statusText = when (availability.source) {
-                    AvailabilitySource.MANAGED_DOWNLOAD -> "● Ready"
-                    AvailabilitySource.LINKED_FILE -> "● Ready"
-                    AvailabilitySource.MISSING -> "● Missing file"
+                    AvailabilitySource.MANAGED_DOWNLOAD -> context.getString(R.string.models_ready_dot)
+                    AvailabilitySource.LINKED_FILE -> context.getString(R.string.models_ready_dot)
+                    AvailabilitySource.MISSING -> context.getString(R.string.models_missing_file_dot)
                 },
                 statusKind = if (availability.isAvailable) StatusKind.READY else StatusKind.WARNING,
             )
@@ -203,8 +204,12 @@ object LocalModelManager {
 
         return ActiveModelState(
             displayName = localConfig.displayName.ifBlank { File(modelPath).nameWithoutExtension },
-            metaText = "On-device",
-            statusText = if (File(modelPath).exists()) "● Ready" else "● Missing file",
+            metaText = context.getString(R.string.models_on_device),
+            statusText = if (File(modelPath).exists()) {
+                context.getString(R.string.models_ready_dot)
+            } else {
+                context.getString(R.string.models_missing_file_dot)
+            },
             statusKind = if (File(modelPath).exists()) StatusKind.READY else StatusKind.WARNING,
         )
     }

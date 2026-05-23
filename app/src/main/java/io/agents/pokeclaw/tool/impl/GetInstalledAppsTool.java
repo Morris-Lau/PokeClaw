@@ -9,6 +9,7 @@ import android.content.pm.ResolveInfo;
 
 import io.agents.pokeclaw.ClawApplication;
 import io.agents.pokeclaw.R;
+import io.agents.pokeclaw.i18n.AppLocaleManager;
 import io.agents.pokeclaw.tool.BaseTool;
 import io.agents.pokeclaw.tool.ToolParameter;
 import io.agents.pokeclaw.tool.ToolResult;
@@ -55,6 +56,7 @@ public class GetInstalledAppsTool extends BaseTool {
     @Override
     public ToolResult execute(Map<String, Object> params) {
         String keyword = optionalString(params, "keyword", "");
+        boolean chinese = AppLocaleManager.INSTANCE.shouldUseChinese(ClawApplication.Companion.getInstance());
 
         try {
             PackageManager pm = ClawApplication.Companion.getInstance().getPackageManager();
@@ -63,7 +65,7 @@ public class GetInstalledAppsTool extends BaseTool {
 
             List<ResolveInfo> resolveInfos = pm.queryIntentActivities(mainIntent, 0);
             if (resolveInfos == null || resolveInfos.isEmpty()) {
-                return ToolResult.error("No installed apps found");
+                return ToolResult.error(chinese ? "没有找到已安装应用" : "No installed apps found");
             }
 
             List<String> appList = new ArrayList<>();
@@ -82,18 +84,22 @@ public class GetInstalledAppsTool extends BaseTool {
             }
 
             if (appList.isEmpty()) {
-                return ToolResult.success("No apps found matching keyword: " + keyword);
+                return ToolResult.success(chinese ? "没有找到匹配关键词的应用：" + keyword : "No apps found matching keyword: " + keyword);
             }
 
             Collections.sort(appList);
             StringBuilder sb = new StringBuilder();
-            sb.append("Found ").append(appList.size()).append(" apps:\n");
+            if (chinese) {
+                sb.append("找到 ").append(appList.size()).append(" 个应用：\n");
+            } else {
+                sb.append("Found ").append(appList.size()).append(" apps:\n");
+            }
             for (String app : appList) {
                 sb.append(app).append("\n");
             }
             return ToolResult.success(sb.toString());
         } catch (Exception e) {
-            return ToolResult.error("Failed to get installed apps: " + e.getMessage());
+            return ToolResult.error(chinese ? "获取应用列表失败：" + e.getMessage() : "Failed to get installed apps: " + e.getMessage());
         }
     }
 }

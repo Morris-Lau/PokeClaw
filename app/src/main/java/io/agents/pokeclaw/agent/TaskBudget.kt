@@ -127,17 +127,20 @@ class TaskBudget(
 
         fun getMaxCost(): Double = getConfiguredMaxCost() ?: UNLIMITED_COST_USD
 
-        fun describeCurrentBudget(): String {
+        fun describeCurrentBudget(
+            unlimitedLabel: String = "Unlimited",
+            noCostCapLabel: String = "no $ cap",
+        ): String {
             val tokenLimit = getConfiguredMaxTokens()
             val costLimit = getConfiguredMaxCost()
             return when {
-                tokenLimit == null && costLimit == null -> "Unlimited"
+                tokenLimit == null && costLimit == null -> unlimitedLabel
                 tokenLimit != null && costLimit != null ->
                     "${ModelPricing.formatTokens(tokenLimit)} / ${String.format("$%.2f", costLimit)}"
                 tokenLimit != null ->
-                    "${ModelPricing.formatTokens(tokenLimit)} / no $ cap"
+                    "${ModelPricing.formatTokens(tokenLimit)} / $noCostCapLabel"
                 else ->
-                    "Unlimited / ${String.format("$%.2f", costLimit)}"
+                    "$unlimitedLabel / ${String.format("$%.2f", costLimit)}"
             }
         }
 

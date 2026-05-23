@@ -134,8 +134,6 @@ class TaskOrchestrator(
             }
         }
 
-        ForegroundService.updateTaskStatus(ClawApplication.instance, "Preparing task...")
-
         // Tier 1: Deterministic routing
         val route = pipelineRouter.route(task)
         when (route) {
@@ -196,6 +194,7 @@ class TaskOrchestrator(
                     XLog.i(TAG, "Pipeline Tier 2: Skill — ${route.skillId}")
                     val skill = SkillRegistry.findById(route.skillId)
                     if (skill != null) {
+                        ForegroundService.updateTaskStatus(ClawApplication.instance, "Preparing task...")
                         FloatingCircleManager.ensureShowing()
                         FloatingCircleManager.showTaskNotify(task, channel)
                         Thread({
@@ -227,6 +226,8 @@ class TaskOrchestrator(
                 // Fall through to agent loop
             }
         }
+
+        ForegroundService.updateTaskStatus(ClawApplication.instance, "Preparing task...")
 
         if (!::agentService.isInitialized) {
             XLog.e(TAG, "AgentService not initialized, attempting to initialize")

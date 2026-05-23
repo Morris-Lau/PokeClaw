@@ -3,10 +3,13 @@
 
 package io.agents.pokeclaw
 
+import android.content.Context
 import io.agents.pokeclaw.agent.DefaultAgentService
 import io.agents.pokeclaw.agent.llm.LocalBackendHealth
 import io.agents.pokeclaw.base.BaseApp
 import io.agents.pokeclaw.channel.ChannelManager
+import io.agents.pokeclaw.i18n.AppLocaleManager
+import io.agents.pokeclaw.tool.BaseTool
 import io.agents.pokeclaw.tool.ToolRegistry
 import io.agents.pokeclaw.utils.AppLogStore
 import io.agents.pokeclaw.utils.KVUtils
@@ -27,6 +30,11 @@ class ClawApplication : BaseApp() {
         lateinit var appViewModelInstance: AppViewModel
     }
 
+    override fun attachBaseContext(base: Context) {
+        AppLocaleManager.syncDefaultLocale(base)
+        super.attachBaseContext(base)
+    }
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -36,6 +44,7 @@ class ClawApplication : BaseApp() {
         appViewModelInstance = getAppViewModelProvider()[AppViewModel::class.java]
         KVUtils.init(this)
         LocalBackendHealth.recoverPendingGpuCrashIfNeeded()
+        BaseTool.useChineseDescription = AppLocaleManager.shouldUseChinese(this)
         ToolRegistry.getInstance().registerAllTools(ToolRegistry.DeviceType.MOBILE)
         io.agents.pokeclaw.agent.skill.SkillRegistry.loadBuiltInSkills()
         io.agents.pokeclaw.agent.PlaybookManager.loadAll(this)

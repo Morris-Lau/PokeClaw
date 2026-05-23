@@ -88,30 +88,29 @@ internal class DirectDeviceDataGuard private constructor(
                 isClipboardDataRequest(normalized) ->
                     DeterministicToolCall("clipboard", mapOf("action" to "get"))
 
-                normalized.contains("notif") || normalized.contains("notification") ->
+                isNotificationRequest(normalized) ->
                     DeterministicToolCall("get_notifications", emptyMap())
 
-                normalized.contains("what apps do i have") ||
-                    normalized.contains("installed apps") ||
-                    normalized.contains("apps do i have") ->
+                isInstalledAppsRequest(normalized) ->
                     DeterministicToolCall("get_installed_apps", emptyMap())
 
-                normalized.contains("battery") ->
+                isScreenReadingRequest(normalized) ->
+                    DeterministicToolCall("get_screen_info", emptyMap())
+
+                isBatteryRequest(normalized) ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "battery"))
 
-                normalized.contains("wifi") ->
+                isWifiRequest(normalized) ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "wifi"))
 
-                normalized.contains("bluetooth") ->
+                isBluetoothRequest(normalized) ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "bluetooth"))
 
-                normalized.contains("storage") ->
+                isStorageRequest(normalized) ->
                     DeterministicToolCall("get_device_info", mapOf("category" to "storage"))
 
-                normalized.contains("android version") ||
-                    normalized.contains("phone temp") ||
-                    normalized.contains("temperature") ->
-                    DeterministicToolCall("get_device_info", mapOf("category" to if (normalized.contains("android version")) "device" else "battery"))
+                isDeviceVersionRequest(normalized) || isTemperatureRequest(normalized) ->
+                    DeterministicToolCall("get_device_info", mapOf("category" to if (isDeviceVersionRequest(normalized)) "device" else "battery"))
 
                 else -> null
             }
@@ -128,7 +127,7 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call clipboard(action=\"get\") before you answer.",
                     )
 
-                normalized.contains("notif") || normalized.contains("notification") ->
+                isNotificationRequest(normalized) ->
                     Match(
                         taskText = task.trim(),
                         taskLabel = "notification",
@@ -136,13 +135,12 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call get_notifications() before you answer.",
                     )
 
-                normalized.contains("battery") ||
-                    normalized.contains("wifi") ||
-                    normalized.contains("bluetooth") ||
-                    normalized.contains("storage") ||
-                    normalized.contains("android version") ||
-                    normalized.contains("phone temp") ||
-                    normalized.contains("temperature") ->
+                isBatteryRequest(normalized) ||
+                    isWifiRequest(normalized) ||
+                    isBluetoothRequest(normalized) ||
+                    isStorageRequest(normalized) ||
+                    isDeviceVersionRequest(normalized) ||
+                    isTemperatureRequest(normalized) ->
                     Match(
                         taskText = task.trim(),
                         taskLabel = "device info",
@@ -150,9 +148,7 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call get_device_info(category=...) with the matching category before you answer.",
                     )
 
-                normalized.contains("what apps do i have") ||
-                    normalized.contains("installed apps") ||
-                    normalized.contains("apps do i have") ->
+                isInstalledAppsRequest(normalized) ->
                     Match(
                         taskText = task.trim(),
                         taskLabel = "installed apps",
@@ -160,11 +156,7 @@ internal class DirectDeviceDataGuard private constructor(
                         requiredAction = "Call get_installed_apps() before you answer.",
                     )
 
-                normalized.contains("on my screen") ||
-                    normalized.contains("on screen right now") ||
-                    normalized.contains("read screen") ||
-                    normalized.contains("what's on my screen") ||
-                    normalized.contains("what is on my screen") ->
+                isScreenReadingRequest(normalized) ->
                     Match(
                         taskText = task.trim(),
                         taskLabel = "screen-reading",
@@ -183,6 +175,9 @@ internal class DirectDeviceDataGuard private constructor(
         }
 
         private fun isClipboardDataRequest(normalized: String): Boolean {
+            if (normalized.containsAny("剪贴板", "剪貼板", "剪貼簿")) {
+                return true
+            }
             if (normalized.contains("what i copied") || normalized.contains("what did i copy")) {
                 return true
             }
@@ -206,6 +201,64 @@ internal class DirectDeviceDataGuard private constructor(
                 (normalized.contains("what") || normalized.contains("read") || normalized.contains("show") || normalized.contains("explain")) &&
                     (normalized.contains("clipboard") && (normalized.contains(" my ") || normalized.contains(" the ") || normalized.startsWith("clipboard ")))
             return asksClipboardContents
+        }
+
+        private fun isNotificationRequest(normalized: String): Boolean {
+            return normalized.contains("notif") ||
+                normalized.contains("notification") ||
+                normalized.containsAny("通知", "提醒")
+        }
+
+        private fun isInstalledAppsRequest(normalized: String): Boolean {
+            return normalized.contains("what apps do i have") ||
+                normalized.contains("installed apps") ||
+                normalized.contains("apps do i have") ||
+                normalized.containsAny("有哪些应用", "有哪些app", "已安装应用", "安装了哪些应用", "装了哪些应用", "应用列表", "app列表")
+        }
+
+        private fun isBatteryRequest(normalized: String): Boolean {
+            return normalized.contains("battery") ||
+                normalized.containsAny("电量", "電量", "电池", "電池", "充电", "充電")
+        }
+
+        private fun isWifiRequest(normalized: String): Boolean {
+            return normalized.contains("wifi") ||
+                normalized.contains("wi-fi") ||
+                normalized.containsAny("无线网", "無線網", "无线网络", "無線網路")
+        }
+
+        private fun isBluetoothRequest(normalized: String): Boolean {
+            return normalized.contains("bluetooth") ||
+                normalized.containsAny("蓝牙", "藍牙")
+        }
+
+        private fun isStorageRequest(normalized: String): Boolean {
+            return normalized.contains("storage") ||
+                normalized.containsAny("存储", "儲存", "空间", "空間", "容量")
+        }
+
+        private fun isDeviceVersionRequest(normalized: String): Boolean {
+            return normalized.contains("android version") ||
+                normalized.containsAny("安卓版本", "android版本", "系统版本", "系統版本")
+        }
+
+        private fun isTemperatureRequest(normalized: String): Boolean {
+            return normalized.contains("phone temp") ||
+                normalized.contains("temperature") ||
+                normalized.containsAny("手机温度", "手機溫度", "发热", "發熱")
+        }
+
+        private fun isScreenReadingRequest(normalized: String): Boolean {
+            return normalized.contains("on my screen") ||
+                normalized.contains("on screen right now") ||
+                normalized.contains("read screen") ||
+                normalized.contains("what's on my screen") ||
+                normalized.contains("what is on my screen") ||
+                normalized.containsAny("屏幕上有什么", "屏幕上有什麼", "屏幕内容", "当前屏幕", "目前屏幕", "讀屏", "读屏", "螢幕上有什麼", "畫面上有什麼")
+        }
+
+        private fun String.containsAny(vararg values: String): Boolean {
+            return values.any { contains(it) }
         }
     }
 }

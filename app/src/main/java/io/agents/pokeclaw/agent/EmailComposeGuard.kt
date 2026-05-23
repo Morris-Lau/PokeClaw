@@ -88,8 +88,18 @@ internal class EmailComposeGuard private constructor(
             val startsWithComposeVerb = normalized.startsWith("write ") ||
                 normalized.startsWith("compose ") ||
                 normalized.startsWith("draft ") ||
-                normalized.startsWith("send ")
-            val mentionsEmail = normalized.contains(" email") || normalized.startsWith("email ")
+                normalized.startsWith("send ") ||
+                normalized.startsWith("写") ||
+                normalized.startsWith("撰写") ||
+                normalized.startsWith("起草") ||
+                normalized.startsWith("发送") ||
+                normalized.startsWith("發送")
+            val mentionsEmail = normalized.contains(" email") ||
+                normalized.startsWith("email ") ||
+                normalized.contains("邮件") ||
+                normalized.contains("郵件") ||
+                normalized.contains("邮箱") ||
+                normalized.contains("信件")
             val match = if (startsWithComposeVerb && mentionsEmail) Match(trimmed) else null
             return EmailComposeGuard(match)
         }

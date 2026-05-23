@@ -5,6 +5,7 @@ package io.agents.pokeclaw.ui.chat
 
 import io.agents.pokeclaw.AppCapabilityCoordinator
 import io.agents.pokeclaw.ServiceBindingState
+import android.content.Context
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
@@ -20,6 +21,7 @@ import io.agents.pokeclaw.automation.ExternalAutomationContract
 import io.agents.pokeclaw.automation.ExternalAutomationEntrypoint
 import io.agents.pokeclaw.appViewModel
 import io.agents.pokeclaw.floating.FloatingCircleManager
+import io.agents.pokeclaw.i18n.AppLocaleManager
 import io.agents.pokeclaw.ui.settings.LlmConfigActivity
 import io.agents.pokeclaw.ui.settings.SettingsActivity
 import io.agents.pokeclaw.utils.KVUtils
@@ -62,6 +64,7 @@ class ComposeChatActivity : ComponentActivity() {
     private var pendingExternalRequestId: String? = null
     private var pendingExternalReturnAction: String? = null
     private var pendingExternalReturnPackage: String? = null
+    private var localeSignatureAtCreate: String = ""
 
     private val chatSessionController by lazy {
         ChatSessionController(
@@ -116,8 +119,13 @@ class ComposeChatActivity : ComponentActivity() {
         }
     }
 
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(AppLocaleManager.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        localeSignatureAtCreate = AppLocaleManager.localeSignature(this)
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
         // Hide floating circle only when no task is running
@@ -247,6 +255,12 @@ class ComposeChatActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        val currentSignature = AppLocaleManager.localeSignature(this)
+        if (currentSignature != localeSignatureAtCreate) {
+            localeSignatureAtCreate = currentSignature
+            recreate()
+            return
+        }
         _needsPermission.value =
             AppCapabilityCoordinator.accessibilityState(this) != ServiceBindingState.READY
         _isLocalModelActive.value = ModelConfigRepository.isLocalActive()
