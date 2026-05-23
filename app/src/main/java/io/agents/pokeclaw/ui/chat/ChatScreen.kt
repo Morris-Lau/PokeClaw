@@ -274,18 +274,21 @@ fun ChatScreen(
                     Column(
                         modifier = Modifier.imePadding()
                     ) {
-                        // Quick Tasks collapsible panel (v9 style)
-                        QuickTasksPanel(
-                            isLocalModel = isLocalUI,
-                            onFillTask = { text ->
-                                prefillText = text
-                                prefillIsTask = true
-                                if (isLocalUI) isTaskMode = true
-                            },
-                            onMonitorClick = { showMonitorSheet = true },
-                            monitorActive = activeTasks.isNotEmpty(),
-                            colors = colors,
-                        )
+                        // Quick Tasks — only visible on new conversation (no user messages yet)
+                        val hasUserMessages = messages.any { it.role != ChatMessage.Role.SYSTEM }
+                        if (!hasUserMessages) {
+                            QuickTasksPanel(
+                                isLocalModel = isLocalUI,
+                                onFillTask = { text ->
+                                    prefillText = text
+                                    prefillIsTask = true
+                                    if (isLocalUI) isTaskMode = true
+                                },
+                                onMonitorClick = { showMonitorSheet = true },
+                                monitorActive = activeTasks.isNotEmpty(),
+                                colors = colors,
+                            )
+                        }
 
                         ChatInputBar(
                             isAwaitingReply = isAwaitingReply,
