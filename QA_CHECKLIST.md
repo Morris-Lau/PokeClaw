@@ -861,6 +861,7 @@ Reference prototype: `/home/nicole/MyGithub/PokeClaw/prototype/dashboard-v9.html
 - [ ] **P3-8. Tap auto-switches mode**: tapping quick task on Local tab → auto-switches to Task mode
 - [ ] **P3-9. Background section**: "BACKGROUND" label + Monitor & Auto-Reply card visible below quick tasks
 - [ ] **P3-10. Monitor card tap**: tap Monitor card → centered dialog (NOT bottom sheet) with Contact/App/Tone form + "Start Monitoring" button
+- [ ] **P3-11. Only on new conversation**: quick tasks panel visible when no user messages exist; after sending the first message, panel disappears; starting a new chat brings it back
 
 ### P4. Empty State
 - [ ] **P4-1. Local empty**: PokeClaw icon + "PokeClaw" + "Local AI" + hint with bold 💬 Chat / 🤖 Task + 3 chat prompts (joke, what can you do, email)
