@@ -28,6 +28,9 @@ import io.agents.pokeclaw.agent.CloudProvider
 import io.agents.pokeclaw.agent.ModelPricing
 import io.agents.pokeclaw.agent.llm.ActiveModelMode
 import io.agents.pokeclaw.agent.llm.LocalModelManager
+import io.agents.pokeclaw.agent.llm.ModelDownloadRepository
+import io.agents.pokeclaw.agent.llm.ModelDownloadState
+import io.agents.pokeclaw.agent.llm.ModelDownloadStatus
 import io.agents.pokeclaw.agent.llm.ModelConfigRepository
 import io.agents.pokeclaw.base.BaseActivity
 import io.agents.pokeclaw.ui.chat.ThemeManager
@@ -40,7 +43,6 @@ import kotlin.math.max
 class LlmConfigActivity : BaseActivity() {
 
     private val executor = Executors.newSingleThreadExecutor()
-    private var isDownloading = false
     private var selectedProvider: CloudProvider = CloudProvider.OPENAI
     private var selectedModelId: String = ""
 
@@ -214,35 +216,72 @@ class LlmConfigActivity : BaseActivity() {
 
             row.addView(info)
 
-            // Action button
-            if (downloaded) {
-                if (isActive) {
-                    val check = TextView(this).apply {
-                        text = if (supportedOnDevice) getString(R.string.models_active_ok) else getString(R.string.models_active_warning)
-                        textSize = 12f
-                        setTextColor(if (supportedOnDevice) getColor(R.color.colorSuccessPrimary) else getColor(R.color.colorWarningPrimary))
+            val actionArea = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(actionArea)
+
+            fun addActionText(
+                label: String,
+                color: Int,
+                alphaValue: Float = 1f,
+                onClick: (() -> Unit)? = null,
+            ) {
+                actionArea.addView(TextView(this).apply {
+                    text = label
+                    textSize = 13f
+                    setTextColor(color)
+                    alpha = alphaValue
+                    setPadding(dp(10), dp(6), dp(4), dp(6))
+                    if (onClick != null) {
+                        setOnClickListener { onClick() }
                     }
-                    row.addView(check)
-                } else {
-                    if (isDefaultLocal) {
-                        row.addView(TextView(this).apply {
-                            text = getString(R.string.models_default_ok)
-                            textSize = 12f
-                            setTextColor(getColor(R.color.colorSuccessPrimary))
-                            setPadding(dp(12), dp(6), dp(12), dp(6))
-                        })
+                })
+            }
+
+            fun renderActions(downloadState: ModelDownloadState? = null) {
+                actionArea.removeAllViews()
+                val freshConfig = ModelConfigRepository.snapshot()
+                val freshAvailability = LocalModelManager.availabilityForModel(this, model, freshConfig.local)
+                val freshDownloaded = freshAvailability.isAvailable
+                val freshIsActive = freshConfig.activeMode == ActiveModelMode.LOCAL && freshConfig.local.modelId == model.id
+                val freshIsDefaultLocal = freshConfig.local.modelId == model.id
+                val freshConfiguredBuiltIn = LocalModelManager.configuredBuiltInModel(freshConfig.local)
+                val freshResolvedLocalPath = when (freshAvailability.source) {
+                    LocalModelManager.AvailabilitySource.MANAGED_DOWNLOAD -> LocalModelManager.getModelPath(this, model)
+                    LocalModelManager.AvailabilitySource.LINKED_FILE ->
+                        if (freshConfiguredBuiltIn?.id == model.id) freshConfig.local.modelPath else null
+                    LocalModelManager.AvailabilitySource.MISSING -> null
+                }
+
+                if (downloadState?.isActive == true) {
+                    val label = when (downloadState.status) {
+                        ModelDownloadStatus.RUNNING -> "${downloadState.progressPercent}%"
+                        ModelDownloadStatus.WAITING_NETWORK -> getString(R.string.models_download_waiting)
+                        else -> getString(R.string.models_download_queued)
                     }
-                    if (supportedOnDevice) {
-                        val useBtn = TextView(this).apply {
-                            text = getString(R.string.models_use)
-                            textSize = 13f
-                            setTextColor(getColor(R.color.colorBrandPrimary))
-                            setPadding(dp(12), dp(6), dp(12), dp(6))
-                            setOnClickListener {
-                                val path = resolvedLocalPath
+                    addActionText(label, getColor(R.color.colorInfoPrimary))
+                    addActionText(getString(R.string.models_download_cancel), getColor(R.color.colorWarningPrimary)) {
+                        ModelDownloadRepository.cancel(this, model)
+                    }
+                    return
+                }
+
+                if (freshDownloaded) {
+                    if (freshIsActive) {
+                        addActionText(
+                            if (supportedOnDevice) getString(R.string.models_active_ok) else getString(R.string.models_active_warning),
+                            if (supportedOnDevice) getColor(R.color.colorSuccessPrimary) else getColor(R.color.colorWarningPrimary)
+                        )
+                    } else {
+                        if (freshIsDefaultLocal) {
+                            addActionText(getString(R.string.models_default_ok), getColor(R.color.colorSuccessPrimary))
+                        }
+                        if (supportedOnDevice) {
+                            addActionText(getString(R.string.models_use), getColor(R.color.colorBrandPrimary)) {
+                                val path = freshResolvedLocalPath
                                 if (path != null) {
-                                    // Save as default local model (independent of cloud config)
-                                    // Only switch active provider if currently on local tab
                                     val shouldActivateLocal = ModelConfigRepository.isLocalActive() || !KVUtils.hasDefaultCloudModel()
                                     ModelConfigRepository.saveLocalDefault(path, model.id, shouldActivateLocal)
                                     ClawApplication.appViewModelInstance.updateAgentConfig()
@@ -253,86 +292,48 @@ class LlmConfigActivity : BaseActivity() {
                                     Toast.makeText(this@LlmConfigActivity, R.string.models_file_not_found, Toast.LENGTH_SHORT).show()
                                 }
                             }
+                        } else {
+                            addActionText(getString(R.string.models_needs_ram, model.minRamGb.toString()), getColor(R.color.colorWarningPrimary))
                         }
-                        row.addView(useBtn)
-                    } else {
-                        row.addView(TextView(this).apply {
-                            text = getString(R.string.models_needs_ram, model.minRamGb.toString())
-                            textSize = 12f
-                            setTextColor(getColor(R.color.colorWarningPrimary))
-                            setPadding(dp(12), dp(6), dp(12), dp(6))
-                        })
-                    }
-
-                    if (availability.source == LocalModelManager.AvailabilitySource.MANAGED_DOWNLOAD) {
-                        val delBtn = TextView(this).apply {
-                            text = "🗑"
-                            textSize = 16f
-                            setPadding(dp(8), dp(4), dp(4), dp(4))
-                            alpha = 0.4f
-                            setOnClickListener {
-                                LocalModelManager.deleteModel(this@LlmConfigActivity, model)
+                        if (freshAvailability.source == LocalModelManager.AvailabilitySource.MANAGED_DOWNLOAD) {
+                            addActionText("🗑", getColor(R.color.colorTextSecondary), alphaValue = 0.55f) {
+                                ModelDownloadRepository.cancel(this, model)
+                                LocalModelManager.deleteModel(this, model)
                                 Toast.makeText(this@LlmConfigActivity, getString(R.string.models_deleted, model.displayName), Toast.LENGTH_SHORT).show()
                                 recreate()
                             }
                         }
-                        row.addView(delBtn)
                     }
+                    return
                 }
-            } else {
-                if (supportedOnDevice) {
-                    val dlBtn = TextView(this).apply {
-                        text = getString(R.string.models_download)
-                        textSize = 13f
-                        setTextColor(getColor(R.color.colorInfoPrimary))
-                        setPadding(dp(12), dp(6), dp(12), dp(6))
-                        setOnClickListener {
-                            if (isDownloading) {
-                                Toast.makeText(this@LlmConfigActivity, R.string.models_already_downloading, Toast.LENGTH_SHORT).show()
-                                return@setOnClickListener
-                            }
-                            isDownloading = true
-                            text = getString(R.string.models_downloading)
-                            isEnabled = false
 
-                            executor.submit {
-                                LocalModelManager.downloadModel(this@LlmConfigActivity, model, object : LocalModelManager.DownloadCallback {
-                                    override fun onProgress(bytesDownloaded: Long, totalBytes: Long, bytesPerSecond: Long) {
-                                        val pct = if (totalBytes > 0) (bytesDownloaded * 100 / totalBytes).toInt() else 0
-                                        runOnUiThread { text = "$pct%" }
-                                    }
-                                    override fun onComplete(modelPath: String) {
-                                        runOnUiThread {
-                                            ModelConfigRepository.saveLocalDefault(
-                                                modelPath = modelPath,
-                                                modelId = model.id,
-                                                activateNow = false
-                                            )
-                                            isDownloading = false
-                                            Toast.makeText(this@LlmConfigActivity, R.string.models_downloaded, Toast.LENGTH_SHORT).show()
-                                            recreate()
-                                        }
-                                    }
-                                    override fun onError(error: String) {
-                                        runOnUiThread {
-                                            isDownloading = false
-                                            text = getString(R.string.models_download)
-                                            isEnabled = true
-                                            Toast.makeText(this@LlmConfigActivity, error, Toast.LENGTH_LONG).show()
-                                        }
-                                    }
-                                })
-                            }
-                        }
+                if (supportedOnDevice) {
+                    addActionText(getString(R.string.models_download), getColor(R.color.colorInfoPrimary)) {
+                        ModelDownloadRepository.enqueue(this, model)
                     }
-                    row.addView(dlBtn)
                 } else {
-                    row.addView(TextView(this).apply {
-                        text = getString(R.string.models_needs_ram, model.minRamGb.toString())
-                        textSize = 12f
-                        setTextColor(getColor(R.color.colorWarningPrimary))
-                        setPadding(dp(12), dp(6), dp(12), dp(6))
-                    })
+                    addActionText(getString(R.string.models_needs_ram, model.minRamGb.toString()), getColor(R.color.colorWarningPrimary))
+                }
+            }
+
+            renderActions()
+            ModelDownloadRepository.observe(this, this, model) { state ->
+                if (state.status == ModelDownloadStatus.SUCCEEDED && state.modelPath.isNotBlank()) {
+                    if (KVUtils.getLocalModelPath() != state.modelPath) {
+                        ModelConfigRepository.saveLocalDefault(
+                            modelPath = state.modelPath,
+                            modelId = model.id,
+                            activateNow = false,
+                        )
+                        Toast.makeText(this@LlmConfigActivity, R.string.models_downloaded, Toast.LENGTH_SHORT).show()
+                        recreate()
+                    } else {
+                        renderActions(state)
+                    }
+                } else if (state.status == ModelDownloadStatus.FAILED && state.error.isNotBlank()) {
+                    renderActions(state)
+                } else {
+                    renderActions(state)
                 }
             }
 

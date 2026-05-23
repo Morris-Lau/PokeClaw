@@ -141,6 +141,14 @@
     <string name="models_already_downloading">已经在下载中</string>
     <string name="models_downloading">下载中...</string>
     <string name="models_downloaded">下载完成！</string>
+    <string name="models_download_cancel">取消</string>
+    <string name="models_download_cancelled">下载已取消</string>
+    <string name="models_download_failed">下载失败</string>
+    <string name="models_download_queued">已排队</string>
+    <string name="models_download_waiting">等待网络</string>
+    <string name="models_download_notification_title">正在下载本地模型</string>
+    <string name="models_download_channel_name">模型下载</string>
+    <string name="models_download_channel_description">本地模型下载进度</string>
     <string name="models_storage_summary">%1$d 个模型 · %3$d MB</string>
     <string name="models_storage_detail">已用 %1$d MB，共分配 %2$d MB</string>
     <string name="models_api_key_cleared">API Key 已清除</string>

@@ -425,6 +425,8 @@ Every star helps more people find the project. Every issue helps shape the next 
 - **Simplified Chinese support is now end-to-end.** The app can switch between System default, English, and 简体中文; the main chat, Settings, Models, task flow, and notification surfaces use localized strings.
 - **Chinese device-data prompts use deterministic tools.** Requests such as `电量还剩多少`, `读取剪贴板`, `总结通知`, `手机存储还剩多少`, `我装了哪些应用`, and `屏幕上有什么` route to phone tools before the LLM path.
 - **Chinese direct actions are recognized.** Commands such as `打开设置`, `返回`, `截图`, `打开 Chrome`, and `给 1234567890 发短信` now enter the Tier 1 direct intent/tool path.
+- **Local model downloads are now resumable background work.** Built-in Gemma downloads run through WorkManager with foreground progress, cancellation, Range resume, exact size checks, and checksum verification before a model is marked ready.
+- **Download bug reports carry more evidence.** Debug ZIP summaries now include WorkManager state, partial file size, sidecar metadata, and the last model-download error for each built-in local model.
 
 ### v0.6.12 (2026-04-30)
 - **Hotfix for Android background activity launch limits.** External automation now has an exported activity entrypoint for MacroDroid, Tasker, and Locale-style apps, avoiding Android 16 / targetSdk 36 background launch blocking when a broadcast receiver tries to open the chatroom.

@@ -7,11 +7,8 @@ import android.content.Context
 import android.os.StatFs
 import io.agents.pokeclaw.R
 import io.agents.pokeclaw.utils.XLog
-import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
-import java.util.concurrent.TimeUnit
 
 /**
  * Manages on-device LLM model downloads and storage.
@@ -22,15 +19,16 @@ import java.util.concurrent.TimeUnit
 object LocalModelManager {
 
     private const val TAG = "LocalModelManager"
-    private const val SIZE_TOLERANCE_BYTES = 32L * 1024L * 1024L
 
     /** Available models for download */
     data class ModelInfo(
         val id: String,
         val displayName: String,
         val url: String,
+        val revision: String,
         val fileName: String,
         val sizeBytes: Long,
+        val sha256: String,
         val minRamGb: Int
     )
 
@@ -75,17 +73,21 @@ object LocalModelManager {
         ModelInfo(
             id = "gemma4-e2b",
             displayName = "Gemma 4 E2B — 2.6GB",
-            url = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm",
+            url = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/a4a831c060880f3733135ad22f10e0e9f758f45d/gemma-4-E2B-it.litertlm",
+            revision = "a4a831c060880f3733135ad22f10e0e9f758f45d",
             fileName = "gemma-4-E2B-it.litertlm",
-            sizeBytes = 2_580_000_000L,
+            sizeBytes = 2_588_147_712L,
+            sha256 = "181938105e0eefd105961417e8da75903eacda102c4fce9ce90f50b97139a63c",
             minRamGb = 8
         ),
         ModelInfo(
             id = "gemma4-e4b",
             displayName = "Gemma 4 E4B — 3.6GB",
-            url = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it.litertlm",
+            url = "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/65ce5ba80d8790d66ef11d82d7d079a06f3fef97/gemma-4-E4B-it.litertlm",
+            revision = "65ce5ba80d8790d66ef11d82d7d079a06f3fef97",
             fileName = "gemma-4-E4B-it.litertlm",
-            sizeBytes = 3_650_000_000L,
+            sizeBytes = 3_659_530_240L,
+            sha256 = "0b2a8980ce155fd97673d8e820b4d29d9c7d99b8fa6806f425d969b145bd52e0",
             minRamGb = 10
         ),
     )
@@ -340,7 +342,7 @@ object LocalModelManager {
      */
     fun isModelDownloaded(context: Context, model: ModelInfo): Boolean {
         val file = File(getModelDir(context), model.fileName)
-        return isValidModelFile(file, model)
+        return isValidManagedModelFile(file, model)
     }
 
     /**
@@ -348,7 +350,7 @@ object LocalModelManager {
      */
     fun getModelPath(context: Context, model: ModelInfo): String? {
         val file = File(getModelDir(context), model.fileName)
-        return if (isValidModelFile(file, model)) file.absolutePath else null
+        return if (isValidManagedModelFile(file, model)) file.absolutePath else null
     }
 
     private fun matchesConfiguredModel(model: ModelInfo, localConfig: LocalModelConfig): Boolean {
@@ -396,119 +398,23 @@ object LocalModelManager {
         model: ModelInfo,
         callback: DownloadCallback
     ) {
-        val modelDir = try {
-            getModelDir(context)
-        } catch (e: Exception) {
-            XLog.e(TAG, "Could not prepare model storage", e)
-            callback.onError("Could not prepare model storage: ${e.message}")
-            return
-        }
-        val targetFile = File(modelDir, model.fileName)
-        val tempFile = File(modelDir, "${model.fileName}.downloading")
-        cleanupInvalidFiles(model, targetFile, tempFile)
-
-        // Check free space before starting download
         try {
-            val stat = StatFs(modelDir.absolutePath)
-            val availableBytes = stat.availableBytes
-            val existingTempBytes = if (tempFile.exists()) tempFile.length() else 0L
-            val bytesNeeded = model.sizeBytes - existingTempBytes
-            if (bytesNeeded > 0 && availableBytes < bytesNeeded) {
-                val needGb = String.format("%.1f", bytesNeeded / 1_000_000_000.0)
-                val haveGb = String.format("%.1f", availableBytes / 1_000_000_000.0)
-                XLog.e(TAG, "Not enough storage: need ${needGb}GB, have ${haveGb}GB available")
-                callback.onError("Not enough storage: need ${needGb} GB free, only ${haveGb} GB available")
-                return
-            }
-            XLog.d(TAG, "Storage check passed: need ${bytesNeeded / 1_000_000}MB, have ${availableBytes / 1_000_000}MB")
-        } catch (e: Exception) {
-            XLog.w(TAG, "Could not check storage, proceeding anyway", e)
-        }
-
-        try {
-            val client = OkHttpClient.Builder()
-                .connectTimeout(30, TimeUnit.SECONDS)
-                .readTimeout(60, TimeUnit.SECONDS)
-                .build()
-
-            // Support resume
-            val existingBytes = if (tempFile.exists()) tempFile.length() else 0L
-
-            val requestBuilder = Request.Builder().url(model.url)
-            if (existingBytes > 0) {
-                requestBuilder.addHeader("Range", "bytes=$existingBytes-")
-                XLog.i(TAG, "Resuming download from byte $existingBytes")
-            }
-
-            val response = client.newCall(requestBuilder.build()).execute()
-
-            if (!response.isSuccessful && response.code != 206) {
-                callback.onError("Download failed: HTTP ${response.code}")
-                return
-            }
-
-            val isResumedResponse = existingBytes > 0 && response.code == 206
-            if (existingBytes > 0 && !isResumedResponse) {
-                XLog.w(TAG, "Server ignored Range request for ${model.fileName}; restarting download from scratch")
-                tempFile.delete()
-            }
-
-            val totalBytes = if (isResumedResponse) {
-                // Partial content — total size from Content-Range header
-                val contentRange = response.header("Content-Range")
-                contentRange?.substringAfterLast("/")?.toLongOrNull() ?: model.sizeBytes
-            } else {
-                response.body?.contentLength() ?: model.sizeBytes
-            }
-
-            val body = response.body ?: run {
-                callback.onError("Empty response body")
-                return
-            }
-
-            val startingBytes = if (isResumedResponse) existingBytes else 0L
-            val outputStream = FileOutputStream(tempFile, isResumedResponse)
-            val buffer = ByteArray(8192)
-            var downloadedBytes = startingBytes
-            var lastReportTime = System.currentTimeMillis()
-            var lastReportedBytes = startingBytes
-
-            body.byteStream().use { input ->
-                outputStream.use { output ->
-                    while (true) {
-                        val bytesRead = input.read(buffer)
-                        if (bytesRead == -1) break
-                        output.write(buffer, 0, bytesRead)
-                        downloadedBytes += bytesRead
-
-                        val now = System.currentTimeMillis()
-                        if (now - lastReportTime >= 200) {
-                            val elapsed = (now - lastReportTime) / 1000.0
-                            val speed = ((downloadedBytes - lastReportedBytes) / elapsed).toLong()
-                            callback.onProgress(downloadedBytes, totalBytes, speed)
-                            lastReportTime = now
-                            lastReportedBytes = downloadedBytes
-                        }
+            val path = ModelDownloadEngine().download(
+                modelDir = getModelDir(context),
+                model = model,
+                listener = object : ModelDownloadListener {
+                    override fun onProgress(bytesDownloaded: Long, totalBytes: Long, bytesPerSecond: Long) {
+                        callback.onProgress(bytesDownloaded, totalBytes, bytesPerSecond)
                     }
-                }
-            }
-
-            if (!isValidModelFile(tempFile, model)) {
-                tempFile.delete()
-                callback.onError("Downloaded file looks incomplete or corrupted. Please retry.")
-                return
-            }
-
-            // Rename temp to final
-            if (targetFile.exists()) targetFile.delete()
-            if (!tempFile.renameTo(targetFile)) {
-                callback.onError("Download finished but PokeClaw could not move the model into place")
-                return
-            }
-
-            XLog.i(TAG, "Model downloaded: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
-            callback.onComplete(targetFile.absolutePath)
-
+                },
+            )
+            callback.onComplete(path)
+        } catch (e: ModelDownloadCancelledException) {
+            XLog.w(TAG, "Download cancelled")
+            callback.onError("Download cancelled")
+        } catch (e: ModelDownloadException) {
+            XLog.e(TAG, "Download failed: ${e.message}", e)
+            callback.onError(e.message ?: "Download failed")
         } catch (e: Exception) {
             XLog.e(TAG, "Download failed", e)
             callback.onError("Download failed: ${e.message}")
@@ -519,35 +425,25 @@ object LocalModelManager {
      * Delete a downloaded model to free space.
      */
     fun deleteModel(context: Context, model: ModelInfo): Boolean {
-        val file = File(getModelDir(context), model.fileName)
-        val tempFile = File(getModelDir(context), "${model.fileName}.downloading")
+        val modelDir = getModelDir(context)
+        val file = ModelDownloadMetadataStore.targetFile(modelDir, model)
+        val tempFile = ModelDownloadMetadataStore.tempFile(modelDir, model)
+        val partialSidecar = ModelDownloadMetadataStore.partialSidecar(modelDir, model)
+        val finalSidecar = ModelDownloadMetadataStore.finalSidecar(modelDir, model)
         tempFile.delete()
+        partialSidecar.delete()
+        finalSidecar.delete()
         return if (file.exists()) file.delete() else true
     }
 
-    private fun cleanupInvalidFiles(model: ModelInfo, targetFile: File, tempFile: File) {
-        if (targetFile.exists() && !isValidModelFile(targetFile, model)) {
-            XLog.w(TAG, "Removing invalid completed model file: ${targetFile.absolutePath} (${targetFile.length()} bytes)")
-            targetFile.delete()
-        }
-        if (tempFile.exists() && tempFile.length() > expectedUpperBound(model)) {
-            XLog.w(TAG, "Removing oversized partial download: ${tempFile.absolutePath} (${tempFile.length()} bytes)")
-            tempFile.delete()
-        }
-    }
-
-    private fun isValidModelFile(file: File, model: ModelInfo): Boolean {
+    internal fun isValidManagedModelFile(file: File, model: ModelInfo): Boolean {
         if (!file.exists()) return false
         val length = file.length()
-        if (length <= 0L) return false
-        return length in expectedLowerBound(model)..expectedUpperBound(model)
-    }
-
-    private fun expectedLowerBound(model: ModelInfo): Long {
-        return (model.sizeBytes - maxOf(SIZE_TOLERANCE_BYTES, model.sizeBytes / 20)).coerceAtLeast(1L)
-    }
-
-    private fun expectedUpperBound(model: ModelInfo): Long {
-        return model.sizeBytes + maxOf(SIZE_TOLERANCE_BYTES, model.sizeBytes / 20)
+        if (length != model.sizeBytes) return false
+        val metadata = ModelDownloadMetadataStore.read(
+            ModelDownloadMetadataStore.finalSidecar(file.parentFile ?: return false, model)
+        )
+        return ModelDownloadMetadataStore.matchesModel(metadata, model) &&
+            metadata?.checksumVerified == true
     }
 }
