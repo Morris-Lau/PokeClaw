@@ -136,6 +136,7 @@ dependencies {
     implementation(libs.ok2curl)
     implementation(libs.lifecycle.runtime)
     implementation(libs.lifecycle.viewmodel)
+    implementation(libs.work.runtime.ktx)
     implementation(libs.mmkv)
     implementation(libs.adapter)
     implementation(libs.glide)
@@ -165,6 +166,8 @@ dependencies {
 
 
     testImplementation(libs.junit)
+    testImplementation(libs.mockwebserver)
+    testImplementation(libs.work.testing)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
 }

@@ -9,6 +9,7 @@ import io.agents.pokeclaw.AppCapabilityCoordinator
 import io.agents.pokeclaw.BuildConfig
 import io.agents.pokeclaw.agent.llm.LocalBackendHealth
 import io.agents.pokeclaw.agent.llm.LocalModelManager
+import io.agents.pokeclaw.agent.llm.ModelDownloadRepository
 import io.agents.pokeclaw.agent.llm.ModelConfigRepository
 import io.agents.pokeclaw.service.AutoReplyManager
 import io.agents.pokeclaw.utils.AppLogStore
@@ -119,6 +120,9 @@ object DebugReportManager {
             appendLine("- External model dir status: ${modelStorage.externalStatus}")
             appendLine("- Internal model dir: ${modelStorage.internalDir}")
             appendLine("- Internal model dir status: ${modelStorage.internalStatus}")
+            appendLine()
+            appendLine("Local model downloads")
+            append(ModelDownloadRepository.diagnostics(context))
             appendLine()
             appendLine("Auto-reply")
             appendLine("- Enabled: ${if (autoReplyManager.isEnabled) "Yes" else "No"}")

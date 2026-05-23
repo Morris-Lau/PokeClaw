@@ -141,6 +141,14 @@
     <string name="models_already_downloading">Already downloading</string>
     <string name="models_downloading">Downloading...</string>
     <string name="models_downloaded">Downloaded!</string>
+    <string name="models_download_cancel">Cancel</string>
+    <string name="models_download_cancelled">Download cancelled</string>
+    <string name="models_download_failed">Download failed</string>
+    <string name="models_download_queued">Queued</string>
+    <string name="models_download_waiting">Waiting for network</string>
+    <string name="models_download_notification_title">Downloading local model</string>
+    <string name="models_download_channel_name">Model downloads</string>
+    <string name="models_download_channel_description">Progress for local model downloads</string>
     <string name="models_storage_summary">%1$d model%2$s · %3$d MB</string>
     <string name="models_storage_detail">%1$d MB of %2$d MB allocated</string>
     <string name="models_api_key_cleared">API key cleared</string>

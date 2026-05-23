@@ -15,6 +15,8 @@ import io.agents.pokeclaw.agent.llm.LlmClient
 import io.agents.pokeclaw.agent.llm.LlmSessionManager
 import io.agents.pokeclaw.agent.llm.LocalModelManager
 import io.agents.pokeclaw.agent.llm.LocalModelRuntime
+import io.agents.pokeclaw.agent.llm.ModelDownloadRepository
+import io.agents.pokeclaw.agent.llm.ModelDownloadStatus
 import io.agents.pokeclaw.agent.llm.ModelConfigRepository
 import io.agents.pokeclaw.utils.XLog
 import com.google.ai.edge.litertlm.Contents
@@ -60,6 +62,7 @@ class ChatSessionController(
     private val cloudHistory = mutableListOf<dev.langchain4j.data.message.ChatMessage>()
     private var localUiGeneration: Long = 0
     private var suppressNextCloudSwitchMessage: Boolean = false
+    private var observedAutoDownloadModelId: String? = null
 
     fun isModelReady(): Boolean = isModelReady
 
@@ -153,36 +156,8 @@ class ChatSessionController(
             uiState.downloadProgress.value = 0
             setButtonsEnabled(false)
 
-            executor.submit {
-                LocalModelManager.downloadModel(activity, defaultModel, object : LocalModelManager.DownloadCallback {
-                    override fun onProgress(bytesDownloaded: Long, totalBytes: Long, bytesPerSecond: Long) {
-                        val pct = if (totalBytes > 0) (bytesDownloaded * 100 / totalBytes).toInt() else 0
-                        postToMain {
-                            uiState.downloadProgress.value = pct
-                            uiState.modelStatus.value = "Downloading: $pct%"
-                        }
-                    }
-
-                    override fun onComplete(modelPath: String) {
-                        val currentPath = ModelConfigRepository.snapshot().local.modelPath
-                        if (currentPath.isEmpty() || currentPath == modelPath) {
-                            ModelConfigRepository.activateLocal(modelPath, defaultModel.id)
-                        }
-                        postToMain {
-                            uiState.isDownloading.value = false
-                            loadModelIfReady()
-                        }
-                    }
-
-                    override fun onError(error: String) {
-                        postToMain {
-                            uiState.isDownloading.value = false
-                            uiState.modelStatus.value = "Download failed"
-                            addSystem("Download failed: $error")
-                        }
-                    }
-                })
-            }
+            observeAutoDownload(defaultModel)
+            ModelDownloadRepository.enqueue(activity, defaultModel)
             return
         }
 
@@ -436,6 +411,58 @@ class ChatSessionController(
             postToMain {
                 addSystem("New conversation started.")
                 onRefreshSidebarHistory()
+            }
+        }
+    }
+
+    private fun observeAutoDownload(model: LocalModelManager.ModelInfo) {
+        if (observedAutoDownloadModelId == model.id) return
+        observedAutoDownloadModelId = model.id
+        ModelDownloadRepository.observe(activity, activity, model) { state ->
+            when (state.status) {
+                ModelDownloadStatus.IDLE -> Unit
+                ModelDownloadStatus.QUEUED -> {
+                    uiState.isDownloading.value = true
+                    uiState.downloadProgress.value = 0
+                    uiState.modelStatus.value = "Download queued"
+                    setButtonsEnabled(false)
+                }
+                ModelDownloadStatus.WAITING_NETWORK -> {
+                    uiState.isDownloading.value = true
+                    uiState.modelStatus.value = "Waiting for network..."
+                    setButtonsEnabled(false)
+                }
+                ModelDownloadStatus.RUNNING -> {
+                    uiState.isDownloading.value = true
+                    uiState.downloadProgress.value = state.progressPercent
+                    uiState.modelStatus.value = "Downloading: ${state.progressPercent}%"
+                    setButtonsEnabled(false)
+                }
+                ModelDownloadStatus.SUCCEEDED -> {
+                    val modelPath = state.modelPath.ifBlank {
+                        LocalModelManager.getModelPath(activity, model).orEmpty()
+                    }
+                    if (modelPath.isBlank()) return@observe
+                    val snapshot = ModelConfigRepository.snapshot()
+                    if (snapshot.isLocalActive() &&
+                        (snapshot.local.modelPath.isEmpty() || snapshot.local.modelPath == modelPath)
+                    ) {
+                        ModelConfigRepository.activateLocal(modelPath, model.id)
+                    }
+                    uiState.isDownloading.value = false
+                    loadModelIfReady()
+                }
+                ModelDownloadStatus.FAILED -> {
+                    uiState.isDownloading.value = false
+                    uiState.modelStatus.value = "Download failed"
+                    addSystem("Download failed: ${state.error.ifBlank { "Unknown error" }}")
+                    setButtonsEnabled(false)
+                }
+                ModelDownloadStatus.CANCELLED -> {
+                    uiState.isDownloading.value = false
+                    uiState.modelStatus.value = "Download cancelled"
+                    setButtonsEnabled(false)
+                }
             }
         }
     }

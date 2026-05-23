@@ -1038,6 +1038,19 @@ Layer 1 broadcast bypasses UI routing. Only Layer 3 catches routing bugs.
 
 ---
 
+## U. Local Model Download Reliability
+
+- [ ] **U1. Fresh local download completes**: `adb shell monkey -p io.agents.pokeclaw 1` → Settings → Models → tap `下载` → notification + UI show progress → download completes → model row shows Ready/Use and Local chat can load the model
+- [ ] **U2. Weak network resumes**: start model download → `adb shell svc wifi disable; adb shell svc data disable` → download enters waiting/retry state without marking Ready → `adb shell svc wifi enable; adb shell svc data enable` → same partial file resumes and completes
+- [ ] **U3. Process restart keeps state**: start model download → `adb shell am force-stop io.agents.pokeclaw; adb shell monkey -p io.agents.pokeclaw 1` → Settings Models observes the existing download work/partial state → download resumes or can be resumed without deleting valid partial data
+- [ ] **U4. Cancel preserves partial**: start model download → tap Cancel → worker stops and UI shows cancellable/non-ready state → tap Download again → request resumes from existing `.downloading` bytes instead of starting from zero
+- [ ] **U5. Delete clears all files**: after cancel or completed download → tap Delete → final `.litertlm`, `.downloading`, and sidecar metadata are removed → model row no longer reports Ready
+- [ ] **U6. Corrupt final file rejected**: write an invalid managed `.litertlm` and no verified sidecar through `adb shell run-as io.agents.pokeclaw` → open Settings Models/Local tab → app does not report Ready and prompts re-download instead of loading LiteRT
+- [ ] **U7. Range fallback is safe**: component test with MockWebServer partial `.downloading` → server returns `206` resumes, server ignoring Range restarts from zero, and server `416` only succeeds if the existing partial passes exact validation
+- [ ] **U8. Storage failure is user-visible**: fill or simulate low model storage → start download → user sees a clear not-enough-space error, no corrupt Ready model appears, and debug report includes selected model storage diagnostics
+
+---
+
 ## J. Stress / Edge Cases
 
 - [ ] **J1. Rapid fire**: send 3 messages quickly → no crash, messages queued or latest wins
@@ -1053,6 +1066,14 @@ Layer 1 broadcast bypasses UI routing. Only Layer 3 catches routing bugs.
 ## QA Debug Changelog
 
 Format: `[date] [status] [test-id] description`
+
+### 2026-05-24 — Model download reliability
+
+[2026-05-24] [PASS]    Unit/component  `./gradlew testDebugUnitTest --tests 'io.agents.pokeclaw.agent.llm.*'` passed after adding exact managed-model validation, WorkInfo state mapping, metadata mismatch restart, `206` resume, Range-ignored restart, and `416` local-complete coverage.
+[2026-05-24] [PASS]    Build gate  `./gradlew testDebugUnitTest assembleDebug` passed; `PokeClaw_v0.6.12_20260524_031105.apk` installed on Pixel 9 Pro `4B061FDAP00257`.
+[2026-05-24] [PASS]    H4-e/U1 smoke  ADB launched PokeClaw, opened Settings -> Models, and verified the Models page renders current model, local/cloud defaults, Gemma E2B/E4B rows, and `下载` actions without crashing.
+[2026-05-24] [PASS]    Logcat smoke  After opening Models, `adb logcat -d --pid=$(adb shell pidof io.agents.pokeclaw)` showed no `FATAL EXCEPTION`/`AndroidRuntime` crash; only the expected `LlmConfigActivity` inset log appeared.
+[2026-05-24] [SKIP]    U1-U6/U8 full production E2E  Full multi-GB HuggingFace download completion, device network fault injection through completion, process-kill resume through completion, corrupt-file device injection, and low-storage simulation were not run in this session because they require long production downloads or invasive device storage setup; deterministic download paths are covered by MockWebServer component tests.
 
 ### 2026-05-24 — Simplified Chinese support + language setting
 
