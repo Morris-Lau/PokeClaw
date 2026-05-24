@@ -8,9 +8,17 @@ data class ChatMessage(
     val content: String,
     val timestamp: Long = System.currentTimeMillis(),
     val toolSteps: List<ToolStep>? = null,
-    val modelName: String? = null
+    val modelName: String? = null,
+    val id: String = newId(),
+    val isStreaming: Boolean = false
 ) {
     enum class Role { USER, ASSISTANT, SYSTEM, TOOL_GROUP }
+
+    companion object {
+        fun newId(): String = "msg_${System.currentTimeMillis()}_${ID_COUNTER.getAndIncrement()}"
+
+        private val ID_COUNTER = java.util.concurrent.atomic.AtomicLong(0)
+    }
 }
 
 data class ToolStep(

@@ -635,8 +635,9 @@ private fun MessageList(
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
+    val lastMessageRenderKey = messages.lastOrNull()?.let { "${it.id}:${it.content.length}" }
 
-    LaunchedEffect(messages.size) {
+    LaunchedEffect(messages.size, lastMessageRenderKey) {
         if (messages.isNotEmpty()) {
             scope.launch { listState.animateScrollToItem(messages.size - 1) }
         }
@@ -655,7 +656,13 @@ private fun MessageList(
             val message = messages[index]
             when (message.role) {
                 ChatMessage.Role.USER -> UserBubble(message.content, message.timestamp, colors)
-                ChatMessage.Role.ASSISTANT -> AssistantBubble(message.content, message.timestamp, colors, message.modelName)
+                ChatMessage.Role.ASSISTANT -> AssistantBubble(
+                    message.content,
+                    message.timestamp,
+                    colors,
+                    message.modelName,
+                    message.isStreaming
+                )
                 ChatMessage.Role.SYSTEM -> SystemMessage(message.content, colors)
                 ChatMessage.Role.TOOL_GROUP -> ToolGroup(message, colors)
             }
@@ -698,7 +705,14 @@ private fun UserBubble(text: String, timestamp: Long, colors: PokeclawColors) {
 }
 
 @Composable
-private fun AssistantBubble(text: String, timestamp: Long, colors: PokeclawColors, modelName: String? = null) {
+private fun AssistantBubble(
+    text: String,
+    timestamp: Long,
+    colors: PokeclawColors,
+    modelName: String? = null,
+    isStreaming: Boolean = false
+) {
+    val isTyping = text == "..." || (isStreaming && text.isBlank())
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -719,7 +733,7 @@ private fun AssistantBubble(text: String, timestamp: Long, colors: PokeclawColor
             Spacer(Modifier.width(8.dp))
 
             // Bubble
-            if (text == "...") {
+            if (isTyping) {
                 Surface(
                     color = colors.aiBubble,
                     shape = RoundedCornerShape(20.dp, 20.dp, 20.dp, 4.dp),
@@ -746,7 +760,7 @@ private fun AssistantBubble(text: String, timestamp: Long, colors: PokeclawColor
                 }
             }
         }
-        if (text != "...") {
+        if (!isTyping && !isStreaming) {
             val footer = listOfNotNull(
                 modelName?.takeIf { it.isNotBlank() },
                 formatBubbleTimestamp(timestamp)

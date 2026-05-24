@@ -106,11 +106,13 @@ public class OkHttpClientBuilderAdapter implements HttpClientBuilder {
             String respStr = "";
             if (responseBody != null) {
                 MediaType contentType = responseBody.contentType();
-                respStr = responseBody.string();
-                // Re-wrap (string() can only be consumed once)
-                response = response.newBuilder()
-                        .body(ResponseBody.create(contentType, respStr))
-                        .build();
+                if (!isEventStream(contentType, response.header("Content-Type"))) {
+                    respStr = responseBody.string();
+                    // Re-wrap (string() can only be consumed once)
+                    response = response.newBuilder()
+                            .body(ResponseBody.create(contentType, respStr))
+                            .build();
+                }
             }
 
             XLog.d(TAG, "<-- " + response.code() + " " + request.url() + " (" + durationMs + "ms)");
@@ -137,5 +139,13 @@ public class OkHttpClientBuilderAdapter implements HttpClientBuilder {
 
         OkHttpClient okHttpClient = builder.build();
         return new OkHttpClientAdapter(okHttpClient);
+    }
+
+    private static boolean isEventStream(MediaType contentType, String rawContentType) {
+        if (contentType != null && "text".equalsIgnoreCase(contentType.type())
+                && "event-stream".equalsIgnoreCase(contentType.subtype())) {
+            return true;
+        }
+        return rawContentType != null && rawContentType.toLowerCase().contains("text/event-stream");
     }
 }

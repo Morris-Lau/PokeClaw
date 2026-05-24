@@ -18,14 +18,20 @@ import io.agents.pokeclaw.agent.llm.LocalModelRuntime
 import io.agents.pokeclaw.agent.llm.ModelDownloadRepository
 import io.agents.pokeclaw.agent.llm.ModelDownloadStatus
 import io.agents.pokeclaw.agent.llm.ModelConfigRepository
+import io.agents.pokeclaw.agent.llm.StreamingListener
 import io.agents.pokeclaw.utils.XLog
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.SamplerConfig
 import java.io.File
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.ExecutorService
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 
 data class ChatSessionUiState(
     val messages: SnapshotStateList<ChatMessage>,
@@ -57,6 +63,10 @@ class ChatSessionController(
     private var conversation: Conversation? = null
     private var isModelReady = false
 
+    private val renderController = ChatRenderPacer(
+        ChatRenderController(uiState.messages, source = "chat"),
+        source = "chat"
+    )
     private var cloudClient: LlmClient? = null
     private var cloudModelName: String? = null
     private val cloudHistory = mutableListOf<dev.langchain4j.data.message.ChatMessage>()
@@ -283,24 +293,63 @@ class ChatSessionController(
     fun sendChat(text: String) {
         addUser(text)
         uiState.isAwaitingReply.value = true
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
+        val streamId = "chat_${System.currentTimeMillis()}"
+        val initialModelTag = uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
+        renderController.render(
+            ChatRenderEvent.AssistantStreamStarted(
+                streamId = streamId,
+                modelName = initialModelTag
+            )
+        )
 
         executor.submit {
             try {
-                if (cloudClient != null) {
+                val activeCloudClient = cloudClient
+                if (activeCloudClient != null) {
                     ensureCloudHistoryInitialized()
                     cloudHistory.add(UserMessage.from(text))
-                    val llmResponse = cloudClient!!.chat(cloudHistory, emptyList())
-                    val responseText = llmResponse.text ?: "(no response)"
+                    val streamedText = StringBuilder()
+                    val streamedTextLock = Any()
+                    val llmResponse = activeCloudClient.chatStreaming(
+                        cloudHistory,
+                        emptyList(),
+                        object : StreamingListener {
+                            override fun onPartialText(token: String) {
+                                if (token.isEmpty()) return
+                                synchronized(streamedTextLock) {
+                                    streamedText.append(token)
+                                }
+                                postToMain {
+                                    renderController.render(
+                                        ChatRenderEvent.AssistantStreamDelta(
+                                            streamId = streamId,
+                                            text = token
+                                        )
+                                    )
+                                }
+                            }
+
+                            override fun onComplete(response: io.agents.pokeclaw.agent.llm.LlmResponse) = Unit
+                            override fun onError(error: Throwable) = Unit
+                        }
+                    )
+                    val responseText = llmResponse.text
+                        ?: synchronized(streamedTextLock) { streamedText.toString() }.takeIf { it.isNotBlank() }
+                        ?: "(no response)"
                     cloudHistory.add(AiMessage.from(responseText))
                     val usage = llmResponse.tokenUsage
                     val inputTokens = usage?.inputTokenCount() ?: (text.length / 4 + 1)
                     val outputTokens = usage?.outputTokenCount() ?: (responseText.length / 4 + 1)
                     val fallbackModelName = cloudModelName ?: ModelConfigRepository.snapshot().activeCloud.modelName
                     val modelTag = llmResponse.modelName ?: fallbackModelName
-                    XLog.d(TAG, "sendChat: cloud response modelName='${llmResponse.modelName}', fallback='$fallbackModelName'")
                     postToMain {
-                        replaceTypingIndicator(responseText, modelTag)
+                        renderController.render(
+                            ChatRenderEvent.AssistantStreamCompleted(
+                                streamId = streamId,
+                                finalText = responseText,
+                                modelName = modelTag
+                            )
+                        )
                         uiState.isAwaitingReply.value = false
                         uiState.sessionTokens.value += inputTokens + outputTokens
                         uiState.sessionCost.value += ModelPricing.estimateCost(modelTag, inputTokens, outputTokens)
@@ -311,14 +360,20 @@ class ChatSessionController(
                     if (currentConversation == null || !isModelReady) {
                         throw IllegalStateException("Local model is still loading. Try again in a moment.")
                     }
-                    val response = currentConversation.sendMessage(text)
-                    val responseText = response?.toString() ?: "(no response)"
+                    val responseText = sendLocalMessageStreaming(currentConversation, text, streamId)
+                        .ifBlank { "(no response)" }
                     val inputTokensEst = text.length / 4 + 1
                     val outputTokensEst = responseText.length / 4 + 1
                     val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
                     val localModelTag = localModelTag(modelPath)
                     postToMain {
-                        replaceTypingIndicator(responseText, localModelTag)
+                        renderController.render(
+                            ChatRenderEvent.AssistantStreamCompleted(
+                                streamId = streamId,
+                                finalText = responseText,
+                                modelName = localModelTag
+                            )
+                        )
                         uiState.isAwaitingReply.value = false
                         uiState.sessionTokens.value += inputTokensEst + outputTokensEst
                         onPersistConversation()
@@ -329,12 +384,27 @@ class ChatSessionController(
                     XLog.w(TAG, "GPU inference failed, falling back to CPU: ${e.message}")
                     try {
                         val modelPath = ModelConfigRepository.snapshot().local.modelPath.ifEmpty { loadedModelPath.orEmpty() }
-                        val responseText = retryLocalChatOnCpu(modelPath, text)
+                        postToMain {
+                            renderController.render(
+                                ChatRenderEvent.AssistantStreamDelta(
+                                    streamId = streamId,
+                                    text = "",
+                                    isSnapshot = true
+                                )
+                            )
+                        }
+                        val responseText = retryLocalChatOnCpuStreaming(modelPath, text, streamId)
                         val inputTokensEst = text.length / 4 + 1
                         val outputTokensEst = responseText.length / 4 + 1
                         val cpuModelTag = localModelTag(modelPath)
                         postToMain {
-                            replaceTypingIndicator(responseText, cpuModelTag)
+                            renderController.render(
+                                ChatRenderEvent.AssistantStreamCompleted(
+                                    streamId = streamId,
+                                    finalText = responseText,
+                                    modelName = cpuModelTag
+                                )
+                            )
                             uiState.isAwaitingReply.value = false
                             uiState.sessionTokens.value += inputTokensEst + outputTokensEst
                             updateLocalModelStatus(modelPath)
@@ -347,7 +417,12 @@ class ChatSessionController(
                 }
                 XLog.e(TAG, "Chat error", e)
                 postToMain {
-                    replaceTypingIndicator("Error: ${e.message}")
+                    renderController.render(
+                        ChatRenderEvent.AssistantStreamFailed(
+                            streamId = streamId,
+                            error = e.message ?: "Unknown error"
+                        )
+                    )
                     uiState.isAwaitingReply.value = false
                 }
             }
@@ -565,7 +640,7 @@ class ChatSessionController(
         }
     }
 
-    private fun retryLocalChatOnCpu(modelPath: String, text: String): String {
+    private fun retryLocalChatOnCpuStreaming(modelPath: String, text: String, streamId: String): String {
         require(modelPath.isNotEmpty()) { "Local model path missing for CPU retry" }
         try {
             conversation?.close()
@@ -582,8 +657,70 @@ class ChatSessionController(
         engine = lease.engine
         loadedModelPath = modelPath
         conversation = lease.conversation
-        XLog.i(TAG, "retryLocalChatOnCpu: CPU runtime ready, retrying sendMessage")
-        return conversation!!.sendMessage(text)?.toString() ?: "(no response)"
+        return sendLocalMessageStreaming(conversation!!, text, streamId)
+    }
+
+    private fun sendLocalMessageStreaming(
+        activeConversation: Conversation,
+        text: String,
+        streamId: String
+    ): String {
+        val latch = CountDownLatch(1)
+        val errorRef = AtomicReference<Throwable?>()
+        val lock = Any()
+        val emittedText = StringBuilder()
+
+        activeConversation.sendMessageAsync(
+            text,
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    val raw = message.toString()
+                    if (raw.isEmpty()) return
+                    val delta = synchronized(lock) {
+                        val current = emittedText.toString()
+                        if (raw.startsWith(current)) {
+                            val next = raw.removePrefix(current)
+                            emittedText.clear()
+                            emittedText.append(raw)
+                            next
+                        } else {
+                            emittedText.append(raw)
+                            raw
+                        }
+                    }
+                    if (delta.isNotEmpty()) {
+                        postToMain {
+                            renderController.render(
+                                ChatRenderEvent.AssistantStreamDelta(
+                                    streamId = streamId,
+                                    text = delta
+                                )
+                            )
+                        }
+                    }
+                }
+
+                override fun onDone() {
+                    latch.countDown()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    errorRef.set(throwable)
+                    latch.countDown()
+                }
+            },
+            emptyMap<String, Any>()
+        )
+
+        if (!latch.await(120, TimeUnit.SECONDS)) {
+            try {
+                activeConversation.cancelProcess()
+            } catch (_: Exception) {
+            }
+            throw RuntimeException("Local streaming response timed out after 120 seconds")
+        }
+        errorRef.get()?.let { throw RuntimeException("Local streaming error", it) }
+        return synchronized(lock) { emittedText.toString() }
     }
 
     private fun buildConversationConfig(systemPrompt: String? = null): ConversationConfig {
@@ -626,28 +763,12 @@ class ChatSessionController(
         }
     }
 
-    private fun replaceTypingIndicator(text: String, actualModelName: String? = null) {
-        val modelTag = actualModelName
-            ?: uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
-            ?: ""
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
-        if (idx >= 0) {
-            uiState.messages[idx] = ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag)
-        } else {
-            uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag))
-        }
-    }
-
     private fun addUser(text: String) {
-        uiState.messages.add(ChatMessage(ChatMessage.Role.USER, text))
+        renderController.render(ChatRenderEvent.UserMessage(text))
     }
 
     private fun addSystem(text: String) {
-        val last = uiState.messages.lastOrNull()
-        if (last?.role == ChatMessage.Role.SYSTEM && last.content.equals(text, ignoreCase = true)) {
-            return
-        }
-        uiState.messages.add(ChatMessage(ChatMessage.Role.SYSTEM, text))
+        renderController.render(ChatRenderEvent.SystemMessage(text))
     }
 
     private fun updateLocalModelStatus(modelPath: String?) {

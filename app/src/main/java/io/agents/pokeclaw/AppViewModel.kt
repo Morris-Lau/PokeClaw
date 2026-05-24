@@ -92,7 +92,8 @@ class AppViewModel : ViewModel() {
     fun getAgentConfig(): AgentConfig =
         ModelConfigRepository.snapshot().toAgentConfig(
             temperature = 0.1,
-            maxIterations = 60
+            maxIterations = 60,
+            streaming = true
         )
 
     fun updateAgentConfig(): Boolean = taskOrchestrator.updateAgentConfig()

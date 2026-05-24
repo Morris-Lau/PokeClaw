@@ -9,6 +9,7 @@ import io.agents.pokeclaw.utils.XLog
 import com.google.ai.edge.litertlm.Contents
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.MessageCallback
 import com.google.ai.edge.litertlm.OpenApiTool
 import com.google.ai.edge.litertlm.SamplerConfig
@@ -22,6 +23,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage
 import dev.langchain4j.data.message.UserMessage
 import com.google.gson.Gson
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -154,7 +156,11 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         }
     }
 
-    private fun chatInternal(messages: List<ChatMessage>, toolSpecs: List<ToolSpecification>): LlmResponse {
+    private fun chatInternal(
+        messages: List<ChatMessage>,
+        toolSpecs: List<ToolSpecification>,
+        streamingListener: StreamingListener? = null
+    ): LlmResponse {
         ensureEngine()
 
         // Detect new task or recreate needed
@@ -181,7 +187,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                     val conv = conversation ?: throw RuntimeException("LiteRT-LM conversation not initialized — engine may have failed to load the model")
                     XLog.d(TAG, "chat: sendMessage user (${msg.singleText().take(80)}...) sendCount=$sendCount")
                     try {
-                        lastResponse = conv.sendMessage(msg.singleText())
+                        lastResponse = sendConversationMessage(conv, msg.singleText(), streamingListener)
                     } catch (e: Exception) {
                         // LiteRT-LM SDK may fail to parse tool calls with standard quotes.
                         // Extract raw model output from error message and parse ourselves.
@@ -206,7 +212,7 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
                     val conv = conversation ?: throw RuntimeException("LiteRT-LM conversation not initialized — engine may have failed to load the model")
                     XLog.d(TAG, "chat: sendMessage toolResult (${toolResultText.take(80)}...) sendCount=$sendCount")
                     try {
-                        lastResponse = conv.sendMessage(toolResultText)
+                        lastResponse = sendConversationMessage(conv, toolResultText, streamingListener)
                     } catch (e: Exception) {
                         val errorMsg = e.message ?: ""
                         if (errorMsg.contains("Failed to parse tool calls") && errorMsg.contains("tool_call")) {
@@ -232,14 +238,104 @@ class LocalLlmClient(private val config: AgentConfig) : LlmClient {
         toolSpecs: List<ToolSpecification>,
         listener: StreamingListener
     ): LlmResponse {
-        // For now, delegate to blocking chat and simulate streaming
-        // LiteRT-LM streaming requires Flow or MessageCallback which needs more integration
-        val response = chat(messages, toolSpecs)
-        if (!response.text.isNullOrEmpty()) {
-            listener.onPartialText(response.text)
+        val response = try {
+            chatInternal(messages, toolSpecs, listener)
+        } catch (e: Exception) {
+            if (!gpuFailed && LocalModelRuntime.isGpuBackendFailure(e)) {
+                XLog.w(TAG, "chatStreaming: GPU inference failed, retrying with CPU: ${e.message}")
+                fallbackToCpu()
+                chatInternal(messages, toolSpecs, listener)
+            } else {
+                listener.onError(e)
+                throw e
+            }
         }
         listener.onComplete(response)
         return response
+    }
+
+    private fun sendConversationMessage(
+        conv: com.google.ai.edge.litertlm.Conversation,
+        text: String,
+        streamingListener: StreamingListener?
+    ): Any? {
+        if (streamingListener == null) {
+            return conv.sendMessage(text)
+        }
+        return sendConversationMessageStreaming(conv, text, streamingListener)
+    }
+
+    private fun sendConversationMessageStreaming(
+        conv: com.google.ai.edge.litertlm.Conversation,
+        text: String,
+        streamingListener: StreamingListener
+    ): Any? {
+        val latch = CountDownLatch(1)
+        val errorRef = AtomicReference<Throwable?>()
+        val lastMessageRef = AtomicReference<Message?>()
+        val lock = Any()
+        val emittedText = StringBuilder()
+
+        conv.sendMessageAsync(
+            text,
+            object : MessageCallback {
+                override fun onMessage(message: Message) {
+                    lastMessageRef.set(message)
+                    val raw = message.toString()
+                    if (raw.isEmpty()) return
+                    val delta = synchronized(lock) {
+                        val current = emittedText.toString()
+                        if (raw.startsWith(current)) {
+                            val next = raw.removePrefix(current)
+                            emittedText.clear()
+                            emittedText.append(raw)
+                            next
+                        } else {
+                            emittedText.append(raw)
+                            raw
+                        }
+                    }
+                    if (delta.isNotEmpty()) {
+                        streamingListener.onPartialText(delta)
+                    }
+                }
+
+                override fun onDone() {
+                    latch.countDown()
+                }
+
+                override fun onError(throwable: Throwable) {
+                    errorRef.set(throwable)
+                    latch.countDown()
+                }
+            },
+            emptyMap<String, Any>()
+        )
+
+        if (!latch.await(120, TimeUnit.SECONDS)) {
+            try {
+                conv.cancelProcess()
+            } catch (_: Exception) {
+            }
+            throw RuntimeException("Local streaming response timed out after 120 seconds")
+        }
+
+        errorRef.get()?.let { error ->
+            extractToolCallRawOutput(error.message.orEmpty())?.let { return it }
+            throw RuntimeException("Local streaming error", error)
+        }
+
+        return lastMessageRef.get() ?: synchronized(lock) { emittedText.toString() }
+    }
+
+    private fun extractToolCallRawOutput(errorMsg: String): String? {
+        if (!errorMsg.contains("Failed to parse tool calls") || !errorMsg.contains("tool_call")) {
+            return null
+        }
+        return errorMsg.substringAfter("from response: ")
+            .substringBefore("code block:")
+            .ifEmpty { errorMsg.substringAfter("from response: ") }
+            .trim()
     }
 
     /**

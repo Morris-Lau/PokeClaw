@@ -61,6 +61,11 @@ class TaskFlowController(
     private var sendTaskRetryCount = 0
     private var lastMonitorStatusNote: String? = null
     private val pipelineRouter = PipelineRouter(activity)
+    private val renderController = ChatRenderPacer(
+        ChatRenderController(uiState.messages, source = "task"),
+        source = "task"
+    )
+    private var activeTaskStreamId: String? = null
 
     fun sendTask(text: String) {
         if (appViewModel.isTaskRunning()) {
@@ -172,13 +177,12 @@ class TaskFlowController(
         }
 
         val agentPromptOverride = buildAgentPromptOverride(text)
+        val taskId = "task_${System.currentTimeMillis()}"
         addUser(text)
         uiState.isAwaitingReply.value = true
         uiState.isTaskRunning.value = false
         XLog.i(TAG, "sendTask: isProcessing=TRUE")
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
-
-        val taskId = "task_${System.currentTimeMillis()}"
+        startAssistantStream(taskId)
 
         executor.submit {
             chatSessionController.prepareForTaskStart()
@@ -199,10 +203,11 @@ class TaskFlowController(
 
     private fun executeDirectToolTask(text: String, toolCall: DirectDeviceDataGuard.DeterministicToolCall) {
         ensureNotificationPermission()
+        val streamId = "direct_${System.currentTimeMillis()}"
         addUser(text)
         uiState.isAwaitingReply.value = true
         uiState.isTaskRunning.value = false
-        uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, "..."))
+        startAssistantStream(streamId)
 
         executor.submit {
             try {
@@ -215,15 +220,19 @@ class TaskFlowController(
                     } else {
                         XLog.w(TAG, "executeDirectToolTask: failed tool=${toolCall.toolName}, error=${result.error}")
                     }
-                    replaceTypingIndicator(answer)
+                    completeAssistantStream(answer)
                     onTaskTerminal?.invoke(TaskEvent.Completed(answer))
                     cleanupAfterTask()
                 }
             } catch (e: Exception) {
                 XLog.e(TAG, "executeDirectToolTask failed: ${e.message}", e)
                 activity.runOnUiThread {
-                    replaceTypingIndicator(activity.getString(R.string.task_error_prefix, e.message ?: ""))
-                    onTaskTerminal?.invoke(TaskEvent.Failed(e.message ?: activity.getString(R.string.task_direct_tool_failed)))
+                    val error = e.message ?: activity.getString(R.string.task_direct_tool_failed)
+                    failAssistantStream(
+                        activity.getString(R.string.task_error_prefix, error),
+                        alreadyFormatted = true
+                    )
+                    onTaskTerminal?.invoke(TaskEvent.Failed(error))
                     cleanupAfterTask()
                 }
             }
@@ -295,23 +304,26 @@ class TaskFlowController(
         try {
             when (event) {
                 is TaskEvent.Completed -> {
-                    replaceTypingIndicator(event.answer, event.modelName)
+                    completeAssistantStream(event.answer, event.modelName)
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                     checkAutoReplyConfirmation()
                 }
                 is TaskEvent.Failed -> {
-                    replaceTypingIndicator(activity.getString(R.string.task_error_prefix, event.error))
+                    failAssistantStream(
+                        activity.getString(R.string.task_error_prefix, event.error),
+                        alreadyFormatted = true
+                    )
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                 }
                 is TaskEvent.Cancelled -> {
-                    removeTypingIndicator()
+                    cancelAssistantStream(removeAlways = true)
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                 }
                 is TaskEvent.Blocked -> {
-                    replaceTypingIndicator(activity.getString(R.string.task_blocked_by_system_dialog))
+                    completeAssistantStream(activity.getString(R.string.task_blocked_by_system_dialog))
                     onTaskTerminal?.invoke(event)
                     cleanupAfterTask()
                 }
@@ -319,7 +331,7 @@ class TaskFlowController(
                     uiState.isAwaitingReply.value = false
                     uiState.isTaskRunning.value = true
                     if (!event.toolName.contains("Finish", ignoreCase = true)) {
-                        removeTypingIndicator()
+                        cancelAssistantStream(removeAlways = true)
                         addSystem("${event.toolName}...")
                     }
                 }
@@ -330,7 +342,7 @@ class TaskFlowController(
                 }
                 is TaskEvent.Response -> {
                     uiState.isAwaitingReply.value = false
-                    replaceTypingIndicator(event.text)
+                    completeAssistantStream(event.text)
                 }
                 is TaskEvent.Progress -> {
                     uiState.isAwaitingReply.value = false
@@ -341,29 +353,77 @@ class TaskFlowController(
                     uiState.isAwaitingReply.value = false
                     uiState.isTaskRunning.value = true
                 }
-                is TaskEvent.TokenUpdate, is TaskEvent.Thinking -> Unit
+                is TaskEvent.Thinking -> {
+                    appendAssistantStream(event.content)
+                }
+                is TaskEvent.TokenUpdate -> Unit
             }
         } catch (e: Exception) {
             XLog.w(TAG, "handleTaskEvent error", e)
         }
     }
 
-    private fun replaceTypingIndicator(text: String, actualModelName: String? = null) {
-        val modelTag = actualModelName
-            ?: uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim()
-            ?: ""
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
-        if (idx >= 0) {
-            uiState.messages[idx] = ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag)
-        } else {
-            uiState.messages.add(ChatMessage(ChatMessage.Role.ASSISTANT, text, modelName = modelTag))
-        }
+    private fun startAssistantStream(streamId: String = "task_stream_${System.currentTimeMillis()}"): String {
+        activeTaskStreamId = streamId
+        renderController.render(
+            ChatRenderEvent.AssistantStreamStarted(
+                streamId = streamId,
+                modelName = currentModelTag()
+            )
+        )
+        return streamId
+    }
+
+    private fun ensureAssistantStream(): String {
+        return activeTaskStreamId ?: startAssistantStream()
+    }
+
+    private fun appendAssistantStream(delta: String) {
+        if (delta.isEmpty()) return
+        val streamId = ensureAssistantStream()
+        renderController.render(
+            ChatRenderEvent.AssistantStreamDelta(
+                streamId = streamId,
+                text = delta
+            )
+        )
+    }
+
+    private fun completeAssistantStream(text: String, actualModelName: String? = null) {
+        val streamId = ensureAssistantStream()
+        renderController.render(
+            ChatRenderEvent.AssistantStreamCompleted(
+                streamId = streamId,
+                finalText = text,
+                modelName = actualModelName ?: currentModelTag()
+            )
+        )
+        activeTaskStreamId = null
         onPersistConversation()
     }
 
-    private fun removeTypingIndicator() {
-        val idx = uiState.messages.indexOfLast { it.role == ChatMessage.Role.ASSISTANT && it.content == "..." }
-        if (idx >= 0) uiState.messages.removeAt(idx)
+    private fun failAssistantStream(error: String, alreadyFormatted: Boolean = false) {
+        val streamId = ensureAssistantStream()
+        renderController.render(
+            ChatRenderEvent.AssistantStreamFailed(
+                streamId = streamId,
+                error = error,
+                alreadyFormatted = alreadyFormatted
+            )
+        )
+        activeTaskStreamId = null
+        onPersistConversation()
+    }
+
+    private fun cancelAssistantStream(removeAlways: Boolean = false) {
+        val streamId = activeTaskStreamId ?: return
+        renderController.render(
+            ChatRenderEvent.AssistantStreamCancelled(
+                streamId = streamId,
+                removeAlways = removeAlways
+            )
+        )
+        activeTaskStreamId = null
     }
 
     private fun cleanupAfterTask() {
@@ -411,11 +471,15 @@ class TaskFlowController(
     }
 
     private fun addUser(text: String) {
-        uiState.messages.add(ChatMessage(ChatMessage.Role.USER, text))
+        renderController.render(ChatRenderEvent.UserMessage(text))
     }
 
     private fun addSystem(text: String) {
-        uiState.messages.add(ChatMessage(ChatMessage.Role.SYSTEM, text))
+        renderController.render(ChatRenderEvent.SystemMessage(text))
+    }
+
+    private fun currentModelTag(): String {
+        return uiState.modelStatus.value.removePrefix("● ").split(" ·").firstOrNull()?.trim().orEmpty()
     }
 
     private fun openSettings() {
